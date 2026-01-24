@@ -1,0 +1,17 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: archon-registry-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 10.21.3.200-10.21.3.254
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: archon-registry-advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - archon-registry-pool

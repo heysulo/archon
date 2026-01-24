@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: archon-registry-0-svc
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.21.3.201
+  selector:
+    statefulset.kubernetes.io/pod-name: archon-registry-0
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archon-registry-1-svc
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.21.3.202
+  selector:
+    statefulset.kubernetes.io/pod-name: archon-registry-1
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archon-registry-2-svc
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.21.3.203
+  selector:
+    statefulset.kubernetes.io/pod-name: archon-registry-2
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

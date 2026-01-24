@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: archon-registry
+  labels:
+    app: archon-registry
+spec:
+  serviceName: "archon-registry"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: archon-registry
+  template:
+    metadata:
+      labels:
+        app: archon-registry
+    spec:
+      containers:
+      - name: archon-registry
+        image: 10.21.3.30:80/archon-registry:latest
+        imagePullPolicy: Always
+        env:
+        - name: MY_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ARCHON_REGISTRY_LOCATIONS
+          value: "10.21.3.201|10.21.3.202|10.21.3.203"
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            ORDINAL=${MY_POD_NAME##*-}
+            MY_IP=$(echo $ARCHON_REGISTRY_LOCATIONS | awk -F'|' -v idx=$((ORDINAL+1)) '{print $idx}')
+            export MY_EXTERNAL_IP=$MY_IP
+            echo "Pod configured with External IP: $MY_EXTERNAL_IP"
+            java -jar app.jar
+        ports:
+        - containerPort: 8080
+          name: web
