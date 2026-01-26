@@ -7,11 +7,15 @@ import java.util.List;
 public class Constants {
     public static final int REGISTRY_PORT = 8080;
     public static final int REGISTRY_LEADER_ELECTION_SCAN_DELAY = 1_000;
+    public static final int REGISTRY_LEADER_ELECTION_MAX_CONNECTION_ATTEMPTS = 30;
     public static final Instant APPLICATION_START_TIME = Instant.now();
     public static final int RANK_PRIMARY = 1;
     public static final int RANK_MIRROR = 2;
     public static final int RANK_FORECASTED_PRIMARY = 0;
     public static final int RANK_UNKNOWN = -1;
+
+    public static final String APPLICATION_NAME_REGISTRY = "Registry";
+    public static final String APPLICATION_GROUP_NAME = "Archon";
 
     public static List<String> getRegistryLocations() {
         String hosts = System.getenv("ARCHON_REGISTRY_LOCATIONS");
