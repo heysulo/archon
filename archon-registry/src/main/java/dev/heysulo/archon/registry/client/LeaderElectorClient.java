@@ -1,9 +1,9 @@
 package dev.heysulo.archon.registry.client;
 
 import dev.heysulo.archon.registry.constants.Constants;
-import dev.heysulo.archon.registry.messages.application.ApplicationRegistrationMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderElectionMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderStatusMessage;
+import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationResponse;
 import dev.heysulo.archon.registry.server.RegistryServer;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.client.callback.ClientCallback;
@@ -60,14 +60,14 @@ public class LeaderElectorClient implements ClientCallback {
     public void OnMessage(Client client, Message message) {
         if (message instanceof LeaderStatusMessage leaderStatusMessage) {
             handleLeaderStatusMessage(client, leaderStatusMessage);
-        } else if (message instanceof ApplicationRegistrationMessage registrationMessage) {
-            handleRegistrationMessage(client, registrationMessage);
+        } else if (message instanceof RegistryRegistrationResponse registrationMessage) {
+            handleRegistryRegistrationMessage(client, registrationMessage);
         } else {
             logger.error("Unsupported message type: {}", message.getClass().getName());
         }
     }
 
-    private void handleRegistrationMessage(Client client, ApplicationRegistrationMessage rankUpdateMessage) {
+    private void handleRegistryRegistrationMessage(Client client, RegistryRegistrationResponse rankUpdateMessage) {
         logger.info("Received application registration message: {}", rankUpdateMessage.getRank());
         RegistryServer.updateApplicationData(client, rankUpdateMessage);
         primaryClient = client;
