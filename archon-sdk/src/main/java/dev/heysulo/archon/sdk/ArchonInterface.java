@@ -30,6 +30,7 @@ public class ArchonInterface {
     }
 
     public int initialize(String groupName, String applicationName, ArchonCallback callback) {
+        logger.info("Initializing ArchonInterface");
         this.groupName  = groupName;
         this.applicationName = applicationName;
         this.callback = callback;
@@ -39,13 +40,24 @@ public class ArchonInterface {
     }
 
     private void setupPrimaryRegistryConnection() {
-        logger.info("Initializing ArchonInterface");
         RegistryLookupService registryLookupService = RegistryLookupService.getInstance();
         logger.info("Looking for primary registry");
         primaryRegistryLocation = registryLookupService.search();
         logger.info("Creating primary registry connection with {}", primaryRegistryLocation);
         primaryRegistry = PrimaryRegistry.getInstance(this);
         primaryRegistry.connect(primaryRegistryLocation);
+    }
+
+    public void reconnect() {
+        logger.info("[Reconnect] Looking for primary registry");
+        primaryRegistryLocation = null;
+        RegistryLookupService registryLookupService = RegistryLookupService.getInstance();
+        while (primaryRegistryLocation == null) {
+            primaryRegistryLocation = registryLookupService.search();
+        }
+        logger.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
+        primaryRegistry.connect(primaryRegistryLocation);
+        acknowledgeRank(rank);
     }
 
     private void registerApplication() {

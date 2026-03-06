@@ -61,6 +61,7 @@ public class PrimaryRegistry implements ClientCallback {
     public void OnDisconnect(Client client) {
         logger.warn("Disconnected from primary registry at {}", client.getRemoteAddress());
         connected = false;
+        archonInterface.reconnect();
     }
 
     @Override
