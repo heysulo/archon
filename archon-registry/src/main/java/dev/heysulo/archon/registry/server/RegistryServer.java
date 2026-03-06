@@ -96,8 +96,12 @@ public class RegistryServer implements ServerCallback {
     }
 
     private void handleApplicationRegistrationMessage(Client client, ApplicationRegistrationMessage registrationMessage) {
-        Application newApplication = applicationManager.getApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName());
-        newApplication.handleRegistration(client);
+        Application newApplication = applicationManager.getApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName(), registrationMessage.getRank());
+        if (registrationMessage.getRank() == 0) {
+            newApplication.handleRegistration(client);
+        } else {
+            newApplication.setClient(client);
+        }
         logger.info("Application Registered: {}", newApplication.getDisplayName());
     }
 

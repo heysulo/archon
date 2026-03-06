@@ -6,6 +6,7 @@ public class ApplicationRegistrationMessage implements Message {
     String applicationName;
     String groupName;
     String ipAddress;
+    int rank;
 
     public ApplicationRegistrationMessage(String applicationName, String groupName, String ipAddress) {
         this.applicationName = applicationName;
@@ -35,5 +36,13 @@ public class ApplicationRegistrationMessage implements Message {
 
     public void setIpAddress(String ipAddress) {
         this.ipAddress = ipAddress;
+    }
+
+    public int getRank() {
+        return rank;
+    }
+
+    public void setRank(int rank) {
+        this.rank = rank;
     }
 }

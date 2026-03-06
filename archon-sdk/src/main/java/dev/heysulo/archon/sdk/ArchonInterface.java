@@ -57,7 +57,9 @@ public class ArchonInterface {
         }
         logger.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
         primaryRegistry.connect(primaryRegistryLocation);
-        acknowledgeRank(rank);
+        ApplicationRegistrationMessage registrationMessage = new ApplicationRegistrationMessage(groupName, applicationName, "TBD");
+        registrationMessage.setRank(rank);
+        primaryRegistry.sendMessage(registrationMessage);
     }
 
     private void registerApplication() {

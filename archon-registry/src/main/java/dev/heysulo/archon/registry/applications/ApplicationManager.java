@@ -5,7 +5,11 @@ import dev.heysulo.archon.registry.constants.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
@@ -25,34 +29,30 @@ public class ApplicationManager {
     }
 
     public Application getApplicationInstance(String group, String name, int rank) {
-        return withNamespaceLockReturn(group, name, () -> {
-            String appDefName = buildApplicationDefinitionName(group, name);
-            List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
-            return appList.stream()
-                    .filter(a -> a.getRank() == rank)
-                    .findFirst()
-                    .orElseGet(() -> {
-                        Application newApp = createApplication(group, name, rank);
-                        appList.add(newApp);
-                        return newApp;
-                    });
-        });
+        if (rank == 0) {
+            return getApplicationInstance(group, name);
+        }
+        return withNamespaceLockReturn(group, name, () -> getApplication(group, name, rank));
     }
 
     public Application getApplicationInstance(String group, String name) {
         return withNamespaceLockReturn(group, name, () -> {
             int newRank = findNextAvailableRank(group, name);
-            String appDefName = buildApplicationDefinitionName(group, name);
-            List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
-            return appList.stream()
-                    .filter(a -> a.getRank() == newRank)
-                    .findFirst()
-                    .orElseGet(() -> {
-                        Application newApp = createApplication(group, name, newRank);
-                        appList.add(newApp);
-                        return newApp;
-                    });
+            return getApplication(group, name, newRank);
         });
+    }
+
+    private Application getApplication(String group, String name, int rank) {
+        String appDefName = buildApplicationDefinitionName(group, name);
+        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+        return appList.stream()
+                .filter(a -> a.getRank() == rank)
+                .findFirst()
+                .orElseGet(() -> {
+                    Application newApp = createApplication(group, name, rank);
+                    appList.add(newApp);
+                    return newApp;
+                });
     }
 
     private int findNextAvailableRank(String group, String name) {
