@@ -1,8 +1,9 @@
 package dev.heysulo.archon.registry.server;
 
-import dev.heysulo.archon.dictionary.sdk.ApplicationRegistrationMessage;
-import dev.heysulo.archon.dictionary.sdk.PrimaryRegistryLookupMessage;
-import dev.heysulo.archon.dictionary.sdk.PrimaryRegistryLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.applications.ApplicationManager;
 import dev.heysulo.archon.registry.applications.RegistryApplication;
@@ -25,9 +26,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static dev.heysulo.archon.registry.constants.Constants.*;
-import static dev.heysulo.archon.registry.utils.Utils.createRegistrationResponse;
-import static dev.heysulo.archon.registry.utils.Utils.createRegistryRegistrationResponse;
+import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_GROUP_NAME;
+import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_NAME_REGISTRY;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_FORECASTED_PRIMARY;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_MIRROR;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
 
 public class RegistryServer implements ServerCallback {
     public static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_FORECASTED_PRIMARY);
@@ -57,7 +60,7 @@ public class RegistryServer implements ServerCallback {
 
     @Override
     public void OnConnect(Server server, Client client) {
-
+        logger.info("Client connected to registry server. IP:{}, Callback: {}", client.getRemoteAddress(), client.getCallback());
     }
 
     @Override
@@ -93,8 +96,7 @@ public class RegistryServer implements ServerCallback {
 
     private void handleApplicationRegistrationMessage(Client client, ApplicationRegistrationMessage registrationMessage) {
         Application newApplication = applicationManager.getApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName());
-        newApplication.setClient(client);
-        newApplication.send(createRegistrationResponse(newApplication));
+        newApplication.handleRegistration(client);
         logger.info("Application Registered: {}", newApplication.getDisplayName());
     }
 
@@ -109,8 +111,7 @@ public class RegistryServer implements ServerCallback {
         LeaderStatusMessage statusMessage = new LeaderStatusMessage(getRank(), Constants.getMyAddress(), Constants.APPLICATION_START_TIME);
         client.send(statusMessage);
         if (getRank() == RANK_PRIMARY) {
-            Application instance = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
-            client.send(createRegistryRegistrationResponse(instance));
+            setupNewMirrorRegistry(client);
         }
         synchronized (possibleMirrorClients) {
             possibleMirrorClients.add(client);
@@ -164,17 +165,21 @@ public class RegistryServer implements ServerCallback {
             applicationRegistry = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
             synchronized (possibleMirrorClients) {
                 for (Client client : possibleMirrorClients) {
-                    Application instance = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
-                    instance.setClient(client);
-                    instance.send(createRegistryRegistrationResponse(instance));
+                    setupNewMirrorRegistry(client);
                 }
                 possibleMirrorClients.clear();
             }
         } else {
             logger.info("--------------- Acting as MIRROR ---------------");
             disconnectAllPossibleMirrorClients();
+            primaryRegistry.send(new ApplicationRankUpdate(getRank()));
         }
         logger.info("Started as {}", applicationRegistry.getDisplayName());
+    }
+
+    private void setupNewMirrorRegistry(Client client) {
+        Application mirrorInstance = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
+        mirrorInstance.handleRegistration(client);
     }
 
     private void disconnectAllPossibleMirrorClients() {

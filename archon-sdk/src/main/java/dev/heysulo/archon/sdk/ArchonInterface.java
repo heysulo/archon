@@ -1,6 +1,7 @@
 package dev.heysulo.archon.sdk;
 
-import dev.heysulo.archon.dictionary.sdk.ApplicationRegistrationMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
 import dev.heysulo.archon.sdk.exception.PrimaryRegistryCommunicationFailure;
 import dev.heysulo.archon.sdk.registry.PrimaryRegistry;
 import dev.heysulo.archon.sdk.registry.RegistryLookupService;
@@ -19,6 +20,7 @@ public class ArchonInterface {
     int rank;
     String groupName;
     String applicationName;
+    ArchonCallback callback;
 
     public static ArchonInterface getInstance() {
         if (INSTANCE == null) {
@@ -27,9 +29,10 @@ public class ArchonInterface {
         return INSTANCE;
     }
 
-    public int initialize(String groupName, String applicationName) {
+    public int initialize(String groupName, String applicationName, ArchonCallback callback) {
         this.groupName  = groupName;
         this.applicationName = applicationName;
+        this.callback = callback;
         setupPrimaryRegistryConnection();
         registerApplication();
         return rank;
@@ -64,6 +67,11 @@ public class ArchonInterface {
         rankUpdateAvailable = true;
         logger.info("Received rank update. {} -> {}", rank, newRank);
         rank = newRank;
+        callback.onRankUpdateMessage(newRank);
+    }
+
+    public void acknowledgeRank(int rank) {
+        primaryRegistry.sendMessage(new ApplicationRankUpdate(rank));
     }
 
 }

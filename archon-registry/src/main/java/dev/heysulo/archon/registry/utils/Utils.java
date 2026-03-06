@@ -1,6 +1,6 @@
 package dev.heysulo.archon.registry.utils;
 
-import dev.heysulo.archon.dictionary.sdk.ApplicationRegistrationResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationResponseMessage;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationResponse;
 import dev.heysulo.databridge.core.common.Message;

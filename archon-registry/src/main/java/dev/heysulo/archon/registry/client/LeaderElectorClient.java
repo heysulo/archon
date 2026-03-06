@@ -68,7 +68,7 @@ public class LeaderElectorClient implements ClientCallback {
     }
 
     private void handleRegistryRegistrationMessage(Client client, RegistryRegistrationResponse rankUpdateMessage) {
-        logger.info("Received application registration message: {}", rankUpdateMessage.getRank());
+        logger.info("Received application registration message. Rank: {}", rankUpdateMessage.getRank());
         RegistryServer.updateApplicationData(client, rankUpdateMessage);
         primaryClient = client;
         trueRankReceived = true;

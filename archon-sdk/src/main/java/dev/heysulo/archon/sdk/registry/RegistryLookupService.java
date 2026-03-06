@@ -1,7 +1,7 @@
 package dev.heysulo.archon.sdk.registry;
 
-import dev.heysulo.archon.dictionary.sdk.PrimaryRegistryLookupMessage;
-import dev.heysulo.archon.dictionary.sdk.PrimaryRegistryLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
 import dev.heysulo.archon.sdk.constant.RegistryConstants;
 import dev.heysulo.archon.sdk.utils.Utils;
 import dev.heysulo.databridge.core.client.Client;
