@@ -68,7 +68,7 @@ public class LeaderElectorClient implements ClientCallback {
     }
 
     private void handleRegistryRegistrationMessage(Client client, RegistryRegistrationResponse rankUpdateMessage) {
-        logger.info("Received application registration message. Rank: {}", rankUpdateMessage.getRank());
+        logger.info("Received application registration message from {}. Rank: {}", client.getRemoteAddress(), rankUpdateMessage.getRank());
         RegistryServer.updateApplicationData(client, rankUpdateMessage);
         primaryClient = client;
         trueRankReceived = true;
@@ -94,6 +94,14 @@ public class LeaderElectorClient implements ClientCallback {
         reset();
         connectToAllRegistryInstances();
         waitForRegistryInstanceToRespond();
+
+        logger.info("---- Leader Election Summary ----");
+        connectionStatus.forEach((client, rank) -> {
+            logger.info("  {} => rank={}, connected={}", client.getRemoteAddress(), rank, client.isConnected());
+        });
+        logger.info("  {} => rank={} [self]", Constants.getMyAddress(), RegistryServer.getRank());
+        logger.info("---------------------------------");
+
         finalizeRank();
         if (RegistryServer.getRank() != RANK_PRIMARY) {
             confirmPrimaryInstance();

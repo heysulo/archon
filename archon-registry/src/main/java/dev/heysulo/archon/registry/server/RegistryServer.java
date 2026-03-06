@@ -4,6 +4,7 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.applications.ApplicationManager;
 import dev.heysulo.archon.registry.applications.RegistryApplication;
@@ -163,6 +164,7 @@ public class RegistryServer implements ServerCallback {
         if (getRank() == RANK_PRIMARY) {
             logger.info("--------------- Acting as PRIMARY ---------------");
             applicationRegistry = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
+            applicationRegistry.setRunLevel(RunLevel.RUNNING);
             synchronized (possibleMirrorClients) {
                 for (Client client : possibleMirrorClients) {
                     setupNewMirrorRegistry(client);

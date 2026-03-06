@@ -107,11 +107,13 @@ public class Application implements ClientCallback {
 
     @Override
     public void OnDisconnect(Client client) {
-        logger.warn("{} disconnected from registry server.", this.getDisplayName());
-        setRunLevel(RunLevel.KILLED);
-        if (rank == Constants.RANK_PRIMARY) {
-            ApplicationManager.getInstance().electLeader(group, name);
-        }
+        ApplicationManager.withNamespaceLock(group, name, () -> {
+            logger.warn("{} disconnected from registry server.", this.getDisplayName());
+            setRunLevel(RunLevel.KILLED);
+            if (rank == Constants.RANK_PRIMARY) {
+                ApplicationManager.getInstance().electLeader(group, name);
+            }
+        });
     }
 
     @Override
@@ -150,17 +152,23 @@ public class Application implements ClientCallback {
         }
     }
 
-    public void promote() {
-        synchronized (getMyNamespaceLock()) {
-            logger.info("Promoting application {} to Primary", getDisplayName());
-            setRank(Constants.RANK_PRIMARY);
-            setRunLevel(RunLevel.CHANGING);
-            send(new ApplicationRankUpdate(Constants.RANK_PRIMARY));
+    public boolean promote() {
+        if (runLevel != RunLevel.RUNNING || client == null || !client.isConnected()) {
+            logger.warn("Cannot promote {} — not running or disconnected (runLevel={}, connected={})",
+                    getDisplayName(), runLevel, client != null && client.isConnected());
+            return false;
         }
-    }
-
-    private String getMyNamespaceLock() {
-        return ApplicationManager.getNamespaceLock(this.group, this.name);
+        logger.info("Promoting application {} to Primary", getDisplayName());
+        setRank(Constants.RANK_PRIMARY);
+        setRunLevel(RunLevel.CHANGING);
+        try {
+            send(new ApplicationRankUpdate(Constants.RANK_PRIMARY));
+        } catch (Exception e) {
+            logger.error("Failed to send promotion to {}. Reverting.", getDisplayName(), e);
+            setRunLevel(RunLevel.KILLED);
+            return false;
+        }
+        return true;
     }
 
     public boolean isRunning() {
