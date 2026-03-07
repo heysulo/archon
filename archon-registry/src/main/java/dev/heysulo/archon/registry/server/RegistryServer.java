@@ -72,6 +72,7 @@ public class RegistryServer implements ServerCallback {
 
     @Override
     public void OnMessage(Server server, Client client, Message message) {
+        logger.info("Received message from {} type {}", client.getRemoteAddress(), message.getClass().getSimpleName());
         if (message instanceof LeaderElectionMessage) {
             handleLeaderElectionMessage(client, (LeaderElectionMessage) message);
             return;
@@ -122,14 +123,15 @@ public class RegistryServer implements ServerCallback {
             if (probablePrimaryClient) {
                 setRank(RANK_MIRROR);
             }
+            synchronized (possibleMirrorClients) {
+                logger.info("Adding client {} to possible mirror clients. Clients {}", client.getRemoteAddress(), possibleMirrorClients);
+                possibleMirrorClients.add(client);
+            }
         }
         LeaderStatusMessage statusMessage = new LeaderStatusMessage(getRank(), Constants.getMyAddress(), Constants.APPLICATION_START_TIME);
         client.send(statusMessage);
         if (getRank() == RANK_PRIMARY) {
             setupNewMirrorRegistry(client);
-        }
-        synchronized (possibleMirrorClients) {
-            possibleMirrorClients.add(client);
         }
     }
 
@@ -207,6 +209,7 @@ public class RegistryServer implements ServerCallback {
                     throw new RuntimeException(e);
                 }
             });
+            possibleMirrorClients.clear();
         }
     }
 
