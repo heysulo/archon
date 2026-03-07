@@ -2,7 +2,7 @@ package dev.heysulo.archon.dictionary.sdk.messages;
 
 import dev.heysulo.databridge.core.common.Message;
 
-public class ApplicationRankUpdate implements Message {
+public class ApplicationRankUpdate extends AuthenticatedMessage {
     int rank;
 
     public ApplicationRankUpdate(int rank) {

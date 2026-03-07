@@ -2,7 +2,7 @@ package dev.heysulo.archon.dictionary.sdk.messages;
 
 import dev.heysulo.databridge.core.common.Message;
 
-public class ApplicationRegistrationResponseMessage implements Message {
+public class ApplicationRegistrationResponseMessage extends AuthenticatedMessage {
     String applicationName;
     String applicationGroup;
     int rank;
