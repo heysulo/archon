@@ -28,34 +28,23 @@ public class ApplicationManager {
         return instance;
     }
 
-    public Application getApplicationInstance(String group, String name, int rank) {
-        if (rank == 0) {
-            return getApplicationInstance(group, name);
-        }
-        return withNamespaceLockReturn(group, name, () -> getApplication(group, name, rank));
-    }
-
-    public Application getApplicationInstance(String group, String name) {
-        return withNamespaceLockReturn(group, name, () -> {
-            int newRank = findNextAvailableRank(group, name);
-            return getApplication(group, name, newRank);
-        });
-    }
-
-    private Application getApplication(String group, String name, int rank) {
-        String appDefName = buildApplicationDefinitionName(group, name);
-        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
-        return appList.stream()
+    public Application findApplication(String group, String name, int rank) {
+        return findAllApplications(group, name).stream()
                 .filter(a -> a.getRank() == rank)
                 .findFirst()
-                .orElseGet(() -> {
-                    Application newApp = createApplication(group, name, rank);
-                    appList.add(newApp);
-                    return newApp;
-                });
+                .orElse(null);
     }
 
-    private int findNextAvailableRank(String group, String name) {
+    public List<Application> findAllApplications(String group, String name) {
+        String appDefName = buildApplicationDefinitionName(group, name);
+        return applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+    }
+
+    public Application createApplicationWithNextAvailableRank(String group, String name) {
+        return createApplication(group, name, findNextAvailableApplicationRank(group, name));
+    }
+
+    private int findNextAvailableApplicationRank(String group, String name) {
         String appDefName = buildApplicationDefinitionName(group, name);
         List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
         Set<Integer> existingRanks = appList.stream()
@@ -69,8 +58,9 @@ public class ApplicationManager {
         return candidate;
     }
 
-    private Application createApplication(String group, String name, int rank) {
-        if (Constants.APPLICATION_GROUP_NAME.equals(group) && Constants.APPLICATION_NAME_REGISTRY.equals(name)) {
+    public Application createApplication(String group, String name, int rank) {
+        if (Constants.APPLICATION_GROUP_NAME.equals(group)
+                && Constants.APPLICATION_NAME_REGISTRY.equals(name)) {
             return new RegistryApplication(group, name, rank);
         }
         return new Application(group, name, rank);

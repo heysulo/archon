@@ -178,6 +178,10 @@ public class Application implements ClientCallback {
         return true;
     }
 
+    public String getAuthenticationToken() {
+        return authenticationToken;
+    }
+
     public boolean isRunning() {
         return runLevel.getProcessState() == ProcessState.RUNNING;
     }

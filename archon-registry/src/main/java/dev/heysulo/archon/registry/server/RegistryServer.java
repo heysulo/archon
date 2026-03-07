@@ -25,11 +25,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_GROUP_NAME;
-import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_NAME_REGISTRY;
-import static dev.heysulo.archon.registry.constants.Constants.RANK_FORECASTED_PRIMARY;
-import static dev.heysulo.archon.registry.constants.Constants.RANK_MIRROR;
-import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
+import static dev.heysulo.archon.registry.constants.Constants.*;
 
 public class RegistryServer implements ServerCallback {
     public static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_FORECASTED_PRIMARY);
@@ -87,6 +83,7 @@ public class RegistryServer implements ServerCallback {
             return;
         }
 
+        // Handled as Primary
         if (message instanceof ApplicationRegistrationMessage registrationMessage) {
             handleApplicationRegistrationMessage(client, registrationMessage);
         } else {
@@ -95,25 +92,51 @@ public class RegistryServer implements ServerCallback {
     }
 
     private void handleApplicationRegistrationMessage(Client client, ApplicationRegistrationMessage registrationMessage) {
-        Application application = applicationManager.getApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName(), registrationMessage.getRank());
-        if (application.isRunning()) {
-            if (registrationMessage.getAuthenticationToken() == null) {
-                logger.warn("Application {} is already running and authentication token is missing", application.getDisplayName());
-                client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_MISSING));
-                return;
-            }
-            if (!application.isAuthenticated(registrationMessage.getAuthenticationToken())) {
-                logger.warn("Application {} is already running and authentication token is invalid", application.getDisplayName());
-                client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_INVALID));
-                return;
-            }
-        }
-        if (registrationMessage.getRank() == 0) {
-            application.handleRegistration(client);
+        if (registrationMessage.getRank() == RANK_UNKNOWN) {
+            registerNewApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName(), client);
         } else {
-            application.setClient(client);
+            reRegisterExistingApplicationInstanceNg(
+                    registrationMessage.getGroupName(), registrationMessage.getApplicationName(),
+                    registrationMessage.getRank(), registrationMessage.getAuthenticationToken(), client);
         }
-        logger.info("Application Registered: {}", application.getDisplayName());
+    }
+
+    private void registerNewApplicationInstance(String group, String name, Client client) {
+        Application application = applicationManager.createApplicationWithNextAvailableRank(group, name);
+        application.handleRegistration(client);
+    }
+
+    private void reRegisterExistingApplicationInstanceNg(String group, String name, int rank, String authenticationToken, Client client) {
+        Application application = applicationManager.findApplication(group, name, rank);
+        if (application == null) {
+            logger.error("Application {}:{} from {} is attempting to register with a rank which is not provided by the registry. Rank: {}",
+                    group, name, client.getRemoteAddress(), rank);
+            client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_RANK_UNAVAILABLE_FOR_RE_REGISTRATION));
+            return;
+        }
+
+        if (application.isRunning() && !validateAuthenticationToken(application, authenticationToken, client)) {
+            return;
+        }
+
+        application.setClient(client);
+        logger.info("Application {} re-registered with client: {}", application.getDisplayName(), client.getRemoteAddress());
+    }
+
+    private boolean validateAuthenticationToken(Application application, String authenticationToken, Client client) {
+        if (authenticationToken == null) {
+            logger.warn("Cannot re-register application {} without authentication token. Client Address: {}",
+                    application.getDisplayName(), client.getRemoteAddress());
+            client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_MISSING));
+            return false;
+        }
+        if (!application.isAuthenticated(authenticationToken)) {
+            logger.warn("Cannot re-register application {}. Invalid authentication token. Client Address: {}",
+                    application.getDisplayName(), client.getRemoteAddress());
+            client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_INVALID));
+            return false;
+        }
+        return true;
     }
 
     private void handleLeaderElectionMessage(Client client, LeaderElectionMessage message) {
@@ -179,7 +202,10 @@ public class RegistryServer implements ServerCallback {
     public void start() {
         if (getRank() == RANK_PRIMARY) {
             logger.info("--------------- Acting as PRIMARY ---------------");
-            applicationRegistry = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
+            applicationRegistry = applicationManager.findApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
+            if (applicationRegistry == null) {
+                applicationRegistry = applicationManager.createApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
+            }
             applicationRegistry.setRunLevel(RunLevel.RUNNING);
             synchronized (possibleMirrorClients) {
                 for (Client client : possibleMirrorClients) {
@@ -196,7 +222,7 @@ public class RegistryServer implements ServerCallback {
     }
 
     private void setupNewMirrorRegistry(Client client) {
-        Application mirrorInstance = applicationManager.getApplicationInstance(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
+        Application mirrorInstance = applicationManager.createApplicationWithNextAvailableRank(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
         mirrorInstance.handleRegistration(client);
     }
 
