@@ -1,13 +1,11 @@
 package dev.heysulo.archon.registry.server;
 
-import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
-import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
-import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
-import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.*;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.applications.ApplicationManager;
 import dev.heysulo.archon.registry.applications.RegistryApplication;
+import dev.heysulo.archon.registry.constants.ApplicationTermination;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderElectionMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderStatusMessage;
@@ -96,13 +94,25 @@ public class RegistryServer implements ServerCallback {
     }
 
     private void handleApplicationRegistrationMessage(Client client, ApplicationRegistrationMessage registrationMessage) {
-        Application newApplication = applicationManager.getApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName(), registrationMessage.getRank());
-        if (registrationMessage.getRank() == 0) {
-            newApplication.handleRegistration(client);
-        } else {
-            newApplication.setClient(client);
+        Application application = applicationManager.getApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName(), registrationMessage.getRank());
+        if (application.isRunning()) {
+            if (registrationMessage.getAuthenticationToken() == null) {
+                logger.warn("Application {} is already running and authentication token is missing", application.getDisplayName());
+                client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_MISSING));
+                return;
+            }
+            if (!application.isAuthenticated(registrationMessage.getAuthenticationToken())) {
+                logger.warn("Application {} is already running and authentication token is invalid", application.getDisplayName());
+                client.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_INVALID));
+                return;
+            }
         }
-        logger.info("Application Registered: {}", newApplication.getDisplayName());
+        if (registrationMessage.getRank() == 0) {
+            application.handleRegistration(client);
+        } else {
+            application.setClient(client);
+        }
+        logger.info("Application Registered: {}", application.getDisplayName());
     }
 
     private void handleLeaderElectionMessage(Client client, LeaderElectionMessage message) {

@@ -3,6 +3,8 @@ package dev.heysulo.archon.registry.applications;
 import dev.heysulo.archon.dictionary.sdk.enums.ProcessState;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
+import dev.heysulo.archon.dictionary.sdk.messages.AuthenticatedMessage;
+import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.client.callback.ClientCallback;
@@ -19,11 +21,13 @@ import static dev.heysulo.archon.registry.utils.Utils.createRegistryRegistration
 public class Application implements ClientCallback {
     private static final Logger logger = LoggerFactory.getLogger(Application.class);
     private static final Map<Client, Application> clientApplicationMap = new HashMap<>();
+    private final AuthenticationManager authenticationManager = AuthenticationManager.getInstance();
     String group;
     String name;
     int rank;
     Client client;
     RunLevel runLevel;
+    String authenticationToken;
 
     public Application(String group, String name, int rank) {
         this.name = name;
@@ -88,7 +92,10 @@ public class Application implements ClientCallback {
     public void handleRegistration(Client client) {
         setClient(client);
         setRunLevel(RunLevel.STARTING);
-        send(isRegistryInstance() ? createRegistryRegistrationResponse(this) : createRegistrationResponse(this));
+        AuthenticatedMessage registrationResponse = isRegistryInstance() ? createRegistryRegistrationResponse(this) : createRegistrationResponse(this);
+        this.authenticationToken = authenticationManager.generateSecureToken();
+        registrationResponse.setAuthenticationToken(this.authenticationToken);
+        send(registrationResponse);
     }
 
     private boolean isRegistryInstance() {
@@ -173,5 +180,9 @@ public class Application implements ClientCallback {
 
     public boolean isRunning() {
         return runLevel.getProcessState() == ProcessState.RUNNING;
+    }
+
+    public boolean isAuthenticated(String authenticationToken) {
+        return this.authenticationToken.equals(authenticationToken);
     }
 }
