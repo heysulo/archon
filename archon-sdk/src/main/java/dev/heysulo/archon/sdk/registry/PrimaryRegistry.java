@@ -2,6 +2,8 @@ package dev.heysulo.archon.sdk.registry;
 
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationTerminationMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.AuthenticatedMessage;
 import dev.heysulo.archon.sdk.ArchonInterface;
 import dev.heysulo.archon.sdk.constant.RegistryConstants;
 import dev.heysulo.archon.sdk.exception.PrimaryRegistryConnectionFailure;
@@ -18,12 +20,13 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.TimeoutException;
 
 public class PrimaryRegistry implements ClientCallback {
-    private static Logger logger = LoggerFactory.getLogger(PrimaryRegistry.class);
+    private static final Logger logger = LoggerFactory.getLogger(PrimaryRegistry.class);
     private static PrimaryRegistry instance;
     private Client connection;
     private final EventLoopGroup eventLoopGroup = new NioEventLoopGroup(new DefaultThreadFactory("primary-registry-worker-group"));
     private boolean connected = false;
     private final ArchonInterface archonInterface;
+    String authenticationToken;
 
     public PrimaryRegistry(ArchonInterface archonInterface) {
         this.archonInterface = archonInterface;
@@ -68,9 +71,13 @@ public class PrimaryRegistry implements ClientCallback {
     public void OnMessage(Client client, Message message) {
         logger.info("Received message from primary registry. {}", message.getClass().getName());
         if (message instanceof ApplicationRegistrationResponseMessage rankUpdateMessage) {
+            this.authenticationToken = rankUpdateMessage.getAuthenticationToken();
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
         } else if (message instanceof ApplicationRankUpdate rankUpdateMessage) {
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
+        } else if (message instanceof ApplicationTerminationMessage terminationMessage) {
+            logger.error("Received termination message from primary registry. Reason: {}", terminationMessage.getReason());
+            System.exit(1);
         }
     }
 
@@ -80,6 +87,9 @@ public class PrimaryRegistry implements ClientCallback {
     }
 
     public void sendMessage(Message message) {
+        if (message instanceof AuthenticatedMessage authenticatedMessage) {
+            authenticatedMessage.setAuthenticationToken(authenticationToken);
+        }
         connection.send(message);
     }
 }
