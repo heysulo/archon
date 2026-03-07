@@ -11,6 +11,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeoutException;
 
+import static dev.heysulo.archon.sdk.constant.Constants.RANK_UNKNOWN;
+
 public class ArchonInterface {
     private static final Logger logger = LoggerFactory.getLogger(ArchonInterface.class);
     private static ArchonInterface INSTANCE;
@@ -65,6 +67,7 @@ public class ArchonInterface {
     private void registerApplication() {
         rankUpdateAvailable = false;
         ApplicationRegistrationMessage registrationMessage = new ApplicationRegistrationMessage(groupName, applicationName, "TBD");
+        registrationMessage.setRank(RANK_UNKNOWN);
         logger.info("Registering application with Registry");
         primaryRegistry.sendMessage(registrationMessage);
         logger.info("Waiting for application rank update");
