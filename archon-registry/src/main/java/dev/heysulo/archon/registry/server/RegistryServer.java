@@ -10,6 +10,7 @@ import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderElectionMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderStatusMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationResponse;
+import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.common.Message;
 import dev.heysulo.databridge.core.server.BasicServer;
@@ -25,7 +26,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static dev.heysulo.archon.registry.constants.Constants.*;
+import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_GROUP_NAME;
+import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_NAME_REGISTRY;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_FORECASTED_PRIMARY;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_MIRROR;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
+import static dev.heysulo.archon.registry.constants.Constants.RANK_UNKNOWN;
 
 public class RegistryServer implements ServerCallback {
     public static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_FORECASTED_PRIMARY);
@@ -237,6 +243,14 @@ public class RegistryServer implements ServerCallback {
             });
             possibleMirrorClients.clear();
         }
+    }
+
+    public List<Application> getActiveMirrorApplications() {
+        return applicationManager.findAllApplications(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY)
+                .stream()
+                .filter(app -> app.getRank() != RANK_PRIMARY)
+                .filter(app -> app.getRunLevel() == RunLevel.RUNNING)
+                .toList();
     }
 
     public static void setPrimaryConnection(Client newPrimaryClient) {

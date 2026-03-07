@@ -6,6 +6,8 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.AuthenticatedMessage;
 import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
+import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
+import dev.heysulo.archon.registry.server.RegistryServer;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.client.callback.ClientCallback;
 import dev.heysulo.databridge.core.common.Message;
@@ -15,12 +17,14 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 
+import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
 import static dev.heysulo.archon.registry.utils.Utils.createRegistrationResponse;
 import static dev.heysulo.archon.registry.utils.Utils.createRegistryRegistrationResponse;
 
 public class Application implements ClientCallback {
     private static final Logger logger = LoggerFactory.getLogger(Application.class);
     private static final Map<Client, Application> clientApplicationMap = new HashMap<>();
+    private RegistryServer registryServer = null;
     private final AuthenticationManager authenticationManager = AuthenticationManager.getInstance();
     String group;
     String name;
@@ -53,7 +57,11 @@ public class Application implements ClientCallback {
     }
 
     public void setRank(int rank) {
+        if (this.rank == rank) {
+            return;
+        }
         this.rank = rank;
+        syncWithRegistryMirrors();
     }
 
     public Client getClient() {
@@ -87,6 +95,7 @@ public class Application implements ClientCallback {
         }
         logger.info("Updating run level of {} from {} to {}", getDisplayName(), runLevel, newRunLevel);
         this.runLevel = newRunLevel;
+        syncWithRegistryMirrors();
     }
 
     public void handleRegistration(Client client) {
@@ -117,7 +126,7 @@ public class Application implements ClientCallback {
         ApplicationManager.withNamespaceLock(group, name, () -> {
             logger.warn("{} disconnected from registry server.", this.getDisplayName());
             setRunLevel(RunLevel.KILLED);
-            if (rank == Constants.RANK_PRIMARY) {
+            if (rank == RANK_PRIMARY) {
                 ApplicationManager.getInstance().electLeader(group, name);
             }
         });
@@ -125,9 +134,25 @@ public class Application implements ClientCallback {
 
     @Override
     public void OnMessage(Client client, Message message) {
+        logger.info("Received message from {} type {}", client.getRemoteAddress(), message.getClass().getSimpleName());
         if (message instanceof ApplicationRankUpdate rankUpdate) {
             handleApplicationRankUpdate(rankUpdate);
         }
+        if (message instanceof ApplicationSyncMessage applicationSyncMessage) {
+            handleApplicationSyncMessage(applicationSyncMessage);
+        }
+    }
+
+    private void handleApplicationSyncMessage(ApplicationSyncMessage syncMessage) {
+        ApplicationManager applicationManager = ApplicationManager.getInstance();
+        Application application;
+        application = applicationManager.findApplication(syncMessage.getGroup(), syncMessage.getName(), syncMessage.getRank());
+        if (application == null) {
+            application = applicationManager.createApplication(syncMessage.getGroup(), syncMessage.getName(), syncMessage.getRank());
+        }
+        application.setAuthenticationToken(syncMessage.getAuthenticationToken());
+        application.setRunLevel(syncMessage.getRunLevel());
+        logger.info("Synced application {}. Run Level: {}", application.getDisplayName(), application.getRunLevel());
     }
 
     private void handleApplicationRankUpdate(ApplicationRankUpdate rankUpdate) {
@@ -166,10 +191,10 @@ public class Application implements ClientCallback {
             return false;
         }
         logger.info("Promoting application {} to Primary", getDisplayName());
-        setRank(Constants.RANK_PRIMARY);
+        setRank(RANK_PRIMARY);
         setRunLevel(RunLevel.CHANGING);
         try {
-            send(new ApplicationRankUpdate(Constants.RANK_PRIMARY));
+            send(new ApplicationRankUpdate(RANK_PRIMARY));
         } catch (Exception e) {
             logger.error("Failed to send promotion to {}. Reverting.", getDisplayName(), e);
             setRunLevel(RunLevel.KILLED);
@@ -182,11 +207,34 @@ public class Application implements ClientCallback {
         return authenticationToken;
     }
 
+    public void setAuthenticationToken(String authenticationToken) {
+        this.authenticationToken = authenticationToken;
+    }
+
     public boolean isRunning() {
         return runLevel.getProcessState() == ProcessState.RUNNING;
     }
 
     public boolean isAuthenticated(String authenticationToken) {
         return this.authenticationToken.equals(authenticationToken);
+    }
+
+    public void setRegistryServer(RegistryServer registryServer) {
+        this.registryServer = registryServer;
+    }
+
+    private void syncWithRegistryMirrors() {
+        if (registryServer == null) {
+            logger.warn(">>>>>>> Registry server is not initialized. Cannot sync {} with registry mirrors", getDisplayName());
+            return;
+        }
+        if (RegistryServer.getRank() != RANK_PRIMARY) {
+            return;
+        }
+        ApplicationSyncMessage message = new ApplicationSyncMessage(this);
+        registryServer.getActiveMirrorApplications().forEach(app -> {
+            logger.info("Syncing {} with {}", getDisplayName(), app.getDisplayName());
+            app.send(message);
+        });
     }
 }

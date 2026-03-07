@@ -2,6 +2,7 @@ package dev.heysulo.archon.registry.applications;
 
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.constants.Constants;
+import dev.heysulo.archon.registry.server.RegistryServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,6 +69,7 @@ public class ApplicationManager {
         }
         String appDefName = buildApplicationDefinitionName(group, name);
         List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+        application.setRegistryServer(RegistryServer.getInstance());
         appList.add(application);
         return application;
     }
