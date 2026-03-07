@@ -59,11 +59,17 @@ public class ApplicationManager {
     }
 
     public Application createApplication(String group, String name, int rank) {
+        Application application;
         if (Constants.APPLICATION_GROUP_NAME.equals(group)
                 && Constants.APPLICATION_NAME_REGISTRY.equals(name)) {
-            return new RegistryApplication(group, name, rank);
+            application = new RegistryApplication(group, name, rank);
+        } else {
+            application = new Application(group, name, rank);
         }
-        return new Application(group, name, rank);
+        String appDefName = buildApplicationDefinitionName(group, name);
+        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+        appList.add(application);
+        return application;
     }
 
     public void electLeader(String group, String name) {
@@ -72,7 +78,7 @@ public class ApplicationManager {
         List<Application> candidates = applications.get(appDefName)
                 .stream()
                 .filter(app -> app.getRunLevel() == RunLevel.RUNNING)
-                .collect(Collectors.toList());
+                .toList();
 
         for (Application candidate : candidates) {
             if (candidate.promote()) {
