@@ -1,6 +1,7 @@
 package dev.heysulo.archon.registry;
 
 import dev.heysulo.archon.registry.client.LeaderElectorClient;
+import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.server.RegistryServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +22,7 @@ public class MainApplication {
     private void start() throws InterruptedException {
         RegistryServer registryServer = RegistryServer.getInstance();
         registryServer.initialize();
-        LeaderElectorClient.getInstance().start();
+        LeaderElectorClient.getInstance().start(Constants.REGISTRY_LEADER_ELECTION_MAX_CONNECTION_ATTEMPTS);
         registryServer.start();
         logger.info("Archon Registry startup complete.");
     }

@@ -41,6 +41,7 @@ public class PrimaryRegistry implements ClientCallback {
 
     public void connect(String host) {
         connection = new Client(host, RegistryConstants.PORT, this, eventLoopGroup);
+        connection.settings().setHeartbeatInterval(RegistryConstants.HEARTBEAT_INTERVAL);
         try {
             logger.info("Connecting primary registry at {}", host);
             connection.connect();
@@ -55,20 +56,20 @@ public class PrimaryRegistry implements ClientCallback {
     }
 
     @Override
-    public void OnConnect(Client client) {
+    public void onConnect(Client client) {
         logger.info("Connected to primary registry at {}", client.getRemoteAddress());
         connected = true;
     }
 
     @Override
-    public void OnDisconnect(Client client) {
+    public void onDisconnect(Client client) {
         logger.warn("Disconnected from primary registry at {}", client.getRemoteAddress());
         connected = false;
         archonInterface.reconnect();
     }
 
     @Override
-    public void OnMessage(Client client, Message message) {
+    public void onMessage(Client client, Message message) {
         logger.info("Received message from primary registry. {}", message.getClass().getName());
         if (message instanceof ApplicationRegistrationResponseMessage rankUpdateMessage) {
             this.authenticationToken = rankUpdateMessage.getAuthenticationToken();
@@ -82,7 +83,7 @@ public class PrimaryRegistry implements ClientCallback {
     }
 
     @Override
-    public void OnError(Client client, Throwable throwable) {
+    public void onError(Client client, Throwable throwable) {
         logger.warn("Primary registry client error", throwable);
     }
 

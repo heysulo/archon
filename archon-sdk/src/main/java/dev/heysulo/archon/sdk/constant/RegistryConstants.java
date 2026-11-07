@@ -1,10 +1,13 @@
 package dev.heysulo.archon.sdk.constant;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
 public class RegistryConstants {
     public static final int PORT = 8080;
+    public static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(3);
+
     public static List<String> getRegistryLocations() {
         String hosts = System.getenv("ARCHON_REGISTRY_LOCATIONS");
         if (hosts == null) {

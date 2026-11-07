@@ -8,8 +8,8 @@ import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
 import dev.heysulo.archon.registry.server.RegistryServer;
-import dev.heysulo.databridge.core.client.Client;
-import dev.heysulo.databridge.core.client.callback.ClientCallback;
+import dev.heysulo.databridge.core.common.Connection;
+import dev.heysulo.databridge.core.common.ConnectionCallback;
 import dev.heysulo.databridge.core.common.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,15 +21,15 @@ import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
 import static dev.heysulo.archon.registry.utils.Utils.createRegistrationResponse;
 import static dev.heysulo.archon.registry.utils.Utils.createRegistryRegistrationResponse;
 
-public class Application implements ClientCallback {
+public class Application implements ConnectionCallback {
     private static final Logger logger = LoggerFactory.getLogger(Application.class);
-    private static final Map<Client, Application> clientApplicationMap = new HashMap<>();
+    private static final Map<Connection, Application> clientApplicationMap = new HashMap<>();
     private RegistryServer registryServer = null;
     private final AuthenticationManager authenticationManager = AuthenticationManager.getInstance();
     String group;
     String name;
     int rank;
-    Client client;
+    Connection client;
     RunLevel runLevel;
     String authenticationToken;
 
@@ -64,11 +64,11 @@ public class Application implements ClientCallback {
         syncWithRegistryMirrors();
     }
 
-    public Client getClient() {
+    public Connection getClient() {
         return client;
     }
 
-    public void setClient(Client newClient) {
+    public void setClient(Connection newClient) {
         synchronized (clientApplicationMap) {
             clientApplicationMap.remove(this.client);
             newClient.setCallback(this);
@@ -98,7 +98,7 @@ public class Application implements ClientCallback {
         syncWithRegistryMirrors();
     }
 
-    public void handleRegistration(Client client) {
+    public void handleRegistration(Connection client) {
         setClient(client);
         setRunLevel(RunLevel.STARTING);
         AuthenticatedMessage registrationResponse = isRegistryInstance() ? createRegistryRegistrationResponse(this) : createRegistrationResponse(this);
@@ -117,12 +117,7 @@ public class Application implements ClientCallback {
     }
 
     @Override
-    public void OnConnect(Client client) {
-
-    }
-
-    @Override
-    public void OnDisconnect(Client client) {
+    public void onDisconnect(Connection client) {
         ApplicationManager.withNamespaceLock(group, name, () -> {
             logger.warn("{} disconnected from registry server.", this.getDisplayName());
             setRunLevel(RunLevel.KILLED);
@@ -133,7 +128,7 @@ public class Application implements ClientCallback {
     }
 
     @Override
-    public void OnMessage(Client client, Message message) {
+    public void onMessage(Connection client, Message message) {
         logger.info("Received message from {} type {}", client.getRemoteAddress(), message.getClass().getSimpleName());
         if (message instanceof ApplicationRankUpdate rankUpdate) {
             handleApplicationRankUpdate(rankUpdate);
@@ -161,6 +156,9 @@ public class Application implements ClientCallback {
             return;
         }
         setRunLevel(RunLevel.RUNNING);
+        if (isRegistryInstance() && rank != RANK_PRIMARY && registryServer != null) {
+            registryServer.sendStateSnapshot(this);
+        }
     }
 
     private void askToDie(String reason) {
@@ -174,20 +172,20 @@ public class Application implements ClientCallback {
     }
 
     @Override
-    public void OnError(Client client, Throwable throwable) {
+    public void onError(Connection client, Throwable throwable) {
 
     }
 
-    public static Application getApplication(Client client) {
+    public static Application getApplication(Connection client) {
         synchronized (clientApplicationMap) {
             return clientApplicationMap.get(client);
         }
     }
 
     public boolean promote() {
-        if (runLevel != RunLevel.RUNNING || client == null || !client.isConnected()) {
+        if (runLevel != RunLevel.RUNNING || !isConnected()) {
             logger.warn("Cannot promote {} — not running or disconnected (runLevel={}, connected={})",
-                    getDisplayName(), runLevel, client != null && client.isConnected());
+                    getDisplayName(), runLevel, isConnected());
             return false;
         }
         logger.info("Promoting application {} to Primary", getDisplayName());
@@ -209,6 +207,10 @@ public class Application implements ClientCallback {
 
     public void setAuthenticationToken(String authenticationToken) {
         this.authenticationToken = authenticationToken;
+    }
+
+    public boolean isConnected() {
+        return client != null && client.isConnected();
     }
 
     public boolean isRunning() {
