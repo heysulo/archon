@@ -7,8 +7,10 @@ import java.time.Instant;
 public class LeaderElectionMessage implements Message {
     String address;
     Instant startTime;
+    int rank;
 
-    public LeaderElectionMessage(String address, Instant startTime) {
+    public LeaderElectionMessage(int rank, String address, Instant startTime) {
+        this.rank = rank;
         this.address = address;
         this.startTime = startTime;
     }
@@ -19,5 +21,9 @@ public class LeaderElectionMessage implements Message {
 
     public Instant getStartTime() {
         return startTime;
+    }
+
+    public int getRank() {
+        return rank;
     }
 }

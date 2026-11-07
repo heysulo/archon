@@ -41,8 +41,14 @@ public class ApplicationManager {
         return applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
     }
 
+    public List<Application> findAllKnownApplications() {
+        return applications.values().stream().flatMap(List::stream).toList();
+    }
+
     public Application createApplicationWithNextAvailableRank(String group, String name) {
-        return createApplication(group, name, findNextAvailableApplicationRank(group, name));
+        int rank = findNextAvailableApplicationRank(group, name);
+        Application retired = findApplication(group, name, rank);
+        return retired != null ? retired : createApplication(group, name, rank);
     }
 
     private int findNextAvailableApplicationRank(String group, String name) {

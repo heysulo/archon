@@ -5,13 +5,14 @@ import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.applications.ApplicationManager;
 import dev.heysulo.archon.registry.applications.RegistryApplication;
+import dev.heysulo.archon.registry.client.LeaderElectorClient;
 import dev.heysulo.archon.registry.constants.ApplicationTermination;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderElectionMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderStatusMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationResponse;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
-import dev.heysulo.databridge.core.client.Client;
+import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.Message;
 import dev.heysulo.databridge.core.server.BasicServer;
 import dev.heysulo.databridge.core.server.Server;
@@ -22,9 +23,10 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_GROUP_NAME;
 import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_NAME_REGISTRY;
@@ -32,6 +34,7 @@ import static dev.heysulo.archon.registry.constants.Constants.RANK_FORECASTED_PR
 import static dev.heysulo.archon.registry.constants.Constants.RANK_MIRROR;
 import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
 import static dev.heysulo.archon.registry.constants.Constants.RANK_UNKNOWN;
+import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_FAILOVER_CONNECTION_ATTEMPTS;
 
 public class RegistryServer implements ServerCallback {
     public static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_FORECASTED_PRIMARY);
@@ -41,7 +44,9 @@ public class RegistryServer implements ServerCallback {
     private static final RegistryApplication primaryRegistry = new RegistryApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
     private final EventLoopGroup workerGroup;
     private final EventLoopGroup bossGroup;
-    private final List<Client> possibleMirrorClients = Collections.synchronizedList(new ArrayList<>());
+    private final AtomicBoolean failoverInProgress = new AtomicBoolean(false);
+    private final ExecutorService failoverExecutor = Executors.newSingleThreadExecutor(
+            new DefaultThreadFactory("registry-failover", true));
     private final ApplicationManager applicationManager = ApplicationManager.getInstance();
 
     public static RegistryServer getInstance() {
@@ -60,20 +65,17 @@ public class RegistryServer implements ServerCallback {
     }
 
     @Override
-    public void OnConnect(Server server, Client client) {
-        logger.info("Client connected to registry server. IP:{}, Callback: {}", client.getRemoteAddress(), client.getCallback());
+    public void onConnect(Server server, Connection client) {
+        logger.info("Client connected to registry server. IP:{}", client.getRemoteAddress());
     }
 
     @Override
-    public void OnDisconnect(Server server, Client client) {
+    public void onDisconnect(Server server, Connection client) {
         logger.info("Registry Server Client disconnected from {}", client.getRemoteAddress());
-        synchronized (possibleMirrorClients) {
-            possibleMirrorClients.remove(client);
-        }
     }
 
     @Override
-    public void OnMessage(Server server, Client client, Message message) {
+    public void onMessage(Server server, Connection client, Message message) {
         logger.info("Received message from {} type {}", client.getRemoteAddress(), message.getClass().getSimpleName());
         if (message instanceof LeaderElectionMessage) {
             handleLeaderElectionMessage(client, (LeaderElectionMessage) message);
@@ -97,7 +99,7 @@ public class RegistryServer implements ServerCallback {
         }
     }
 
-    private void handleApplicationRegistrationMessage(Client client, ApplicationRegistrationMessage registrationMessage) {
+    private void handleApplicationRegistrationMessage(Connection client, ApplicationRegistrationMessage registrationMessage) {
         if (registrationMessage.getRank() == RANK_UNKNOWN) {
             registerNewApplicationInstance(registrationMessage.getGroupName(), registrationMessage.getApplicationName(), client);
         } else {
@@ -107,12 +109,12 @@ public class RegistryServer implements ServerCallback {
         }
     }
 
-    private void registerNewApplicationInstance(String group, String name, Client client) {
+    private void registerNewApplicationInstance(String group, String name, Connection client) {
         Application application = applicationManager.createApplicationWithNextAvailableRank(group, name);
         application.handleRegistration(client);
     }
 
-    private void reRegisterExistingApplicationInstanceNg(String group, String name, int rank, String authenticationToken, Client client) {
+    private void reRegisterExistingApplicationInstanceNg(String group, String name, int rank, String authenticationToken, Connection client) {
         Application application = applicationManager.findApplication(group, name, rank);
         if (application == null) {
             logger.error("Application {}:{} from {} is attempting to register with a rank which is not provided by the registry. Rank: {}",
@@ -129,7 +131,7 @@ public class RegistryServer implements ServerCallback {
         logger.info("Application {} re-registered with client: {}", application.getDisplayName(), client.getRemoteAddress());
     }
 
-    private boolean validateAuthenticationToken(Application application, String authenticationToken, Client client) {
+    private boolean validateAuthenticationToken(Application application, String authenticationToken, Connection client) {
         if (authenticationToken == null) {
             logger.warn("Cannot re-register application {} without authentication token. Client Address: {}",
                     application.getDisplayName(), client.getRemoteAddress());
@@ -145,27 +147,15 @@ public class RegistryServer implements ServerCallback {
         return true;
     }
 
-    private void handleLeaderElectionMessage(Client client, LeaderElectionMessage message) {
-        if (getRank() == RANK_FORECASTED_PRIMARY) {
-            boolean probablePrimaryClient = Constants.APPLICATION_START_TIME.isAfter(message.getStartTime());
-            logger.info("Registry at {} is {}a probable primary", message.getAddress(), probablePrimaryClient ? "" : "not ");
-            if (probablePrimaryClient) {
-                setRank(RANK_MIRROR);
-            }
-            synchronized (possibleMirrorClients) {
-                logger.info("Adding client {} to possible mirror clients. Clients {}", client.getRemoteAddress(), possibleMirrorClients);
-                possibleMirrorClients.add(client);
-            }
-        }
-        LeaderStatusMessage statusMessage = new LeaderStatusMessage(getRank(), Constants.getMyAddress(), Constants.APPLICATION_START_TIME);
-        client.send(statusMessage);
-        if (getRank() == RANK_PRIMARY) {
-            setupNewMirrorRegistry(client);
+    private void handleLeaderElectionMessage(Connection client, LeaderElectionMessage message) {
+        client.send(new LeaderStatusMessage(getRank(), Constants.getMyAddress(), Constants.APPLICATION_START_TIME));
+        if (getRank() == RANK_PRIMARY && Application.getApplication(client) == null) {
+            setupMirrorRegistry(client, message.getRank());
         }
     }
 
     @Override
-    public void OnError(Server server, Client client, Throwable throwable) {
+    public void onError(Server server, Connection client, Throwable throwable) {
         logger.error("Registry error", throwable);
     }
 
@@ -175,7 +165,9 @@ public class RegistryServer implements ServerCallback {
         }
         logger.info("Starting registry server on port {}", Constants.REGISTRY_PORT);
         registryServer = new BasicServer(Constants.REGISTRY_PORT, this, bossGroup, workerGroup);
-        registryServer.addTrustedPackage("dev.heysulo.archon.**");
+        registryServer.settings().addTrustedPackage("dev.heysulo.archon.**");
+        Constants.TRUSTED_TIME_CLASSES.forEach(registryServer.settings()::addTrustedPackage);
+        registryServer.settings().setHeartbeatInterval(Constants.REGISTRY_HEARTBEAT_INTERVAL);
         try {
             registryServer.start();
             logger.info("Registry server started successfully");
@@ -186,7 +178,7 @@ public class RegistryServer implements ServerCallback {
         }
     }
 
-    public static void updateApplicationData(Client client, RegistryRegistrationResponse message) {
+    public static void updateApplicationData(Connection client, RegistryRegistrationResponse message) {
         setRank(message.getRank());
         applicationRegistry.setName(message.getApplicationName());
         applicationRegistry.setGroup(message.getApplicationGroup());
@@ -207,42 +199,73 @@ public class RegistryServer implements ServerCallback {
 
     public void start() {
         if (getRank() == RANK_PRIMARY) {
-            logger.info("--------------- Acting as PRIMARY ---------------");
-            applicationRegistry = applicationManager.findApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
-            if (applicationRegistry == null) {
-                applicationRegistry = applicationManager.createApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
-            }
-            applicationRegistry.setRunLevel(RunLevel.RUNNING);
-            synchronized (possibleMirrorClients) {
-                for (Client client : possibleMirrorClients) {
-                    setupNewMirrorRegistry(client);
-                }
-                possibleMirrorClients.clear();
-            }
+            actAsPrimary();
         } else {
             logger.info("--------------- Acting as MIRROR ---------------");
-            disconnectAllPossibleMirrorClients();
             primaryRegistry.send(new ApplicationRankUpdate(getRank()));
         }
         logger.info("Started as {}", applicationRegistry.getDisplayName());
     }
 
-    private void setupNewMirrorRegistry(Client client) {
-        Application mirrorInstance = applicationManager.createApplicationWithNextAvailableRank(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
+    private void actAsPrimary() {
+        logger.info("--------------- Acting as PRIMARY ---------------");
+        applicationRegistry = applicationManager.findApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
+        if (applicationRegistry == null) {
+            applicationRegistry = applicationManager.createApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
+        }
+        applicationRegistry.setRunLevel(RunLevel.RUNNING);
+        retireDisconnectedMirrorRecords();
+    }
+
+    // A promoted mirror inherits records of peers it has no connection to. They rejoin through election.
+    private void retireDisconnectedMirrorRecords() {
+        applicationManager.findAllApplications(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY)
+                .stream()
+                .filter(app -> app.getRank() != RANK_PRIMARY)
+                .filter(app -> !app.isConnected())
+                .toList()
+                .forEach(app -> app.setRunLevel(RunLevel.KILLED));
+    }
+
+    private void setupMirrorRegistry(Connection client, int previousRank) {
+        Application mirrorInstance = applicationManager.findApplication(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, previousRank);
+        if (previousRank < RANK_MIRROR || mirrorInstance == null || mirrorInstance.isConnected()) {
+            mirrorInstance = applicationManager.createApplicationWithNextAvailableRank(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
+        }
         mirrorInstance.handleRegistration(client);
     }
 
-    private void disconnectAllPossibleMirrorClients() {
-        synchronized (possibleMirrorClients) {
-            possibleMirrorClients.forEach(client -> {
-                try {
-                    client.disconnect();
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-            possibleMirrorClients.clear();
+    /**
+     * Brings a new mirror up to date. Mirrors only receive changes after they join, so without this a mirror that
+     * restarted would lack every application registered before it, and could lose them if promoted.
+     */
+    public void sendStateSnapshot(Application mirror) {
+        applicationManager.findAllKnownApplications()
+                .forEach(application -> mirror.send(new ApplicationSyncMessage(application)));
+        logger.info("Sent state snapshot to {}", mirror.getDisplayName());
+    }
+
+    /**
+     * Starts an election after losing the primary. It runs on its own thread because an election blocks, and the
+     * caller is a Netty event loop that may be serving the connections the election depends on.
+     */
+    public void handlePrimaryLost() {
+        if (!failoverInProgress.compareAndSet(false, true)) {
+            return;
         }
+        failoverExecutor.execute(() -> {
+            try {
+                LeaderElectorClient.getInstance().start(REGISTRY_FAILOVER_CONNECTION_ATTEMPTS);
+                start();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.error("Failover interrupted", e);
+            } catch (RuntimeException e) {
+                logger.error("Failover failed", e);
+            } finally {
+                failoverInProgress.set(false);
+            }
+        });
     }
 
     public List<Application> getActiveMirrorApplications() {
@@ -250,11 +273,12 @@ public class RegistryServer implements ServerCallback {
                 .stream()
                 .filter(app -> app.getRank() != RANK_PRIMARY)
                 .filter(app -> app.getRunLevel() == RunLevel.RUNNING)
+                .filter(Application::isConnected)
                 .toList();
     }
 
-    public static void setPrimaryConnection(Client newPrimaryClient) {
-        Client currentPrimaryClient = primaryRegistry.getClient();
+    public static void setPrimaryConnection(Connection newPrimaryClient) {
+        Connection currentPrimaryClient = primaryRegistry.getClient();
         if (newPrimaryClient.equals(currentPrimaryClient)) {
             return;
         }

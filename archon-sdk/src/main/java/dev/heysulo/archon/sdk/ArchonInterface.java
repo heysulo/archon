@@ -15,6 +15,7 @@ import static dev.heysulo.archon.sdk.constant.Constants.RANK_UNKNOWN;
 
 public class ArchonInterface {
     private static final Logger logger = LoggerFactory.getLogger(ArchonInterface.class);
+    private static final long RECONNECT_RETRY_DELAY_MILLIS = 1_000;
     private static ArchonInterface INSTANCE;
     private PrimaryRegistry primaryRegistry;
     String primaryRegistryLocation;
@@ -56,12 +57,26 @@ public class ArchonInterface {
         RegistryLookupService registryLookupService = RegistryLookupService.getInstance();
         while (primaryRegistryLocation == null) {
             primaryRegistryLocation = registryLookupService.search();
+            if (primaryRegistryLocation == null && !waitBeforeRetrying()) {
+                logger.warn("[Reconnect] Interrupted while looking for primary registry");
+                return;
+            }
         }
         logger.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
         primaryRegistry.connect(primaryRegistryLocation);
         ApplicationRegistrationMessage registrationMessage = new ApplicationRegistrationMessage(groupName, applicationName, "TBD");
         registrationMessage.setRank(rank);
         primaryRegistry.sendMessage(registrationMessage);
+    }
+
+    private boolean waitBeforeRetrying() {
+        try {
+            Thread.sleep(RECONNECT_RETRY_DELAY_MILLIS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private void registerApplication() {
