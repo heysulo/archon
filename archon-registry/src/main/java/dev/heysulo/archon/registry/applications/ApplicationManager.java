@@ -17,12 +17,15 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class ApplicationManager {
-    private static final Logger logger = LoggerFactory.getLogger(ApplicationManager.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ApplicationManager.class);
     private static ApplicationManager instance;
     private static final ConcurrentHashMap<String, ReentrantLock> namespaceLocks = new ConcurrentHashMap<>();
     private final Map<String, ArrayList<Application>> applications = new HashMap<>();
 
-    public static ApplicationManager getInstance() {
+    private ApplicationManager() {
+    }
+
+    public static synchronized ApplicationManager getInstance() {
         if (instance == null) {
             instance = new ApplicationManager();
         }
@@ -82,7 +85,7 @@ public class ApplicationManager {
 
     public void electLeader(String group, String name) {
         String appDefName = buildApplicationDefinitionName(group, name);
-        logger.info(">>>>>>>>>>>>> Electing leader for app definition: {}", appDefName);
+        LOGGER.info("Electing leader for app definition: {}", appDefName);
         List<Application> candidates = applications.get(appDefName)
                 .stream()
                 .filter(app -> app.getRunLevel() == RunLevel.RUNNING)
@@ -90,20 +93,21 @@ public class ApplicationManager {
 
         for (Application candidate : candidates) {
             if (candidate.promote()) {
-                logger.info("Successfully promoted {} to leader for {}", candidate.getDisplayName(), appDefName);
+                LOGGER.info("Successfully promoted {} to leader for {}", candidate.getDisplayName(), appDefName);
                 return;
             }
-            logger.warn("Promotion failed for {}. Trying next candidate.", candidate.getDisplayName());
+            LOGGER.warn("Promotion failed for {}. Trying next candidate.", candidate.getDisplayName());
         }
-        logger.warn("Could not find a viable leader for {}", appDefName);
+        LOGGER.warn("Could not find a viable leader for {}", appDefName);
     }
-    
+
     private static String buildApplicationDefinitionName(String group, String name) {
         return String.format("%s:%s", group, name);
     }
 
     public static void withNamespaceLock(String group, String name, Runnable action) {
-        ReentrantLock lock = namespaceLocks.computeIfAbsent(buildApplicationDefinitionName(group, name), k -> new ReentrantLock());
+        ReentrantLock lock = namespaceLocks.computeIfAbsent(buildApplicationDefinitionName(group, name),
+                k -> new ReentrantLock());
         lock.lock();
         try {
             action.run();
@@ -113,7 +117,8 @@ public class ApplicationManager {
     }
 
     public static <T> T withNamespaceLockReturn(String group, String name, Supplier<T> action) {
-        ReentrantLock lock = namespaceLocks.computeIfAbsent(buildApplicationDefinitionName(group, name), k -> new ReentrantLock());
+        ReentrantLock lock = namespaceLocks.computeIfAbsent(buildApplicationDefinitionName(group, name),
+                k -> new ReentrantLock());
         lock.lock();
         try {
             return action.get();

@@ -11,30 +11,36 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeoutException;
 
-import static dev.heysulo.archon.sdk.constant.Constants.RANK_UNKNOWN;
+import static dev.heysulo.archon.dictionary.sdk.RegistryProtocol.RANK_UNKNOWN;
 
 public class ArchonInterface {
-    private static final Logger logger = LoggerFactory.getLogger(ArchonInterface.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ArchonInterface.class);
     private static final long PRIMARY_LOOKUP_RETRY_DELAY_MILLIS = 1_000;
-    private static ArchonInterface INSTANCE;
+    private static final long REGISTRATION_TIMEOUT_MILLIS = 5_000;
+    private static final long REGISTRATION_POLL_MILLIS = 100;
+    private static final String IP_ADDRESS_PLACEHOLDER = "TBD";
+    private static ArchonInterface instance;
     private PrimaryRegistry primaryRegistry;
-    String primaryRegistryLocation;
-    private boolean rankUpdateAvailable = false;
-    int rank;
-    String groupName;
-    String applicationName;
-    ArchonCallback callback;
+    private String primaryRegistryLocation;
+    private volatile boolean rankUpdateAvailable = false;
+    private volatile int rank;
+    private String groupName;
+    private String applicationName;
+    private ArchonCallback callback;
 
-    public static ArchonInterface getInstance() {
-        if (INSTANCE == null) {
-            INSTANCE = new ArchonInterface();
+    private ArchonInterface() {
+    }
+
+    public static synchronized ArchonInterface getInstance() {
+        if (instance == null) {
+            instance = new ArchonInterface();
         }
-        return INSTANCE;
+        return instance;
     }
 
     public int initialize(String groupName, String applicationName, ArchonCallback callback) {
-        logger.info("Initializing ArchonInterface");
-        this.groupName  = groupName;
+        LOGGER.info("Initializing ArchonInterface");
+        this.groupName = groupName;
         this.applicationName = applicationName;
         this.callback = callback;
         setupPrimaryRegistryConnection();
@@ -44,28 +50,26 @@ public class ArchonInterface {
 
     private void setupPrimaryRegistryConnection() {
         RegistryLookupService registryLookupService = RegistryLookupService.getInstance();
-        logger.info("Looking for primary registry");
+        LOGGER.info("Looking for primary registry");
         primaryRegistryLocation = waitForPrimaryRegistry(registryLookupService);
         if (primaryRegistryLocation == null) {
             throw new PrimaryRegistryCommunicationFailure("PRIMARY_REGISTRY_LOOKUP", new InterruptedException());
         }
-        logger.info("Creating primary registry connection with {}", primaryRegistryLocation);
+        LOGGER.info("Creating primary registry connection with {}", primaryRegistryLocation);
         primaryRegistry = PrimaryRegistry.getInstance(this);
         primaryRegistry.connect(primaryRegistryLocation);
     }
 
     public void reconnect() {
-        logger.info("[Reconnect] Looking for primary registry");
+        LOGGER.info("[Reconnect] Looking for primary registry");
         primaryRegistryLocation = waitForPrimaryRegistry(RegistryLookupService.getInstance());
         if (primaryRegistryLocation == null) {
-            logger.warn("[Reconnect] Interrupted while looking for primary registry");
+            LOGGER.warn("[Reconnect] Interrupted while looking for primary registry");
             return;
         }
-        logger.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
+        LOGGER.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
         primaryRegistry.connect(primaryRegistryLocation);
-        ApplicationRegistrationMessage registrationMessage = new ApplicationRegistrationMessage(groupName, applicationName, "TBD");
-        registrationMessage.setRank(rank);
-        primaryRegistry.sendMessage(registrationMessage);
+        primaryRegistry.sendMessage(createRegistrationMessage(rank));
     }
 
     /**
@@ -76,7 +80,7 @@ public class ArchonInterface {
     private String waitForPrimaryRegistry(RegistryLookupService registryLookupService) {
         String location = registryLookupService.search();
         while (location == null) {
-            logger.info("No primary registry available. Retrying in {} ms", PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
+            LOGGER.info("No primary registry available. Retrying in {} ms", PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
             if (!waitBeforeRetrying()) {
                 return null;
             }
@@ -97,13 +101,11 @@ public class ArchonInterface {
 
     private void registerApplication() {
         rankUpdateAvailable = false;
-        ApplicationRegistrationMessage registrationMessage = new ApplicationRegistrationMessage(groupName, applicationName, "TBD");
-        registrationMessage.setRank(RANK_UNKNOWN);
-        logger.info("Registering application with Registry");
-        primaryRegistry.sendMessage(registrationMessage);
-        logger.info("Waiting for application rank update");
+        LOGGER.info("Registering application with Registry");
+        primaryRegistry.sendMessage(createRegistrationMessage(RANK_UNKNOWN));
+        LOGGER.info("Waiting for application rank update");
         try {
-            Utils.waitForCondition(() -> rankUpdateAvailable, 5_000, 100);
+            Utils.waitForCondition(() -> rankUpdateAvailable, REGISTRATION_TIMEOUT_MILLIS, REGISTRATION_POLL_MILLIS);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         } catch (TimeoutException e) {
@@ -111,9 +113,16 @@ public class ArchonInterface {
         }
     }
 
+    private ApplicationRegistrationMessage createRegistrationMessage(int requestedRank) {
+        ApplicationRegistrationMessage message =
+                new ApplicationRegistrationMessage(groupName, applicationName, IP_ADDRESS_PLACEHOLDER);
+        message.setRank(requestedRank);
+        return message;
+    }
+
     public void onRankUpdateMessage(int newRank) {
         rankUpdateAvailable = true;
-        logger.info("Received rank update. {} -> {}", rank, newRank);
+        LOGGER.info("Received rank update. {} -> {}", rank, newRank);
         rank = newRank;
         callback.onRankUpdateMessage(newRank);
     }

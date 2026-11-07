@@ -20,19 +20,22 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.TimeoutException;
 
 public class PrimaryRegistry implements ClientCallback {
-    private static final Logger logger = LoggerFactory.getLogger(PrimaryRegistry.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(PrimaryRegistry.class);
+    private static final long CONNECT_TIMEOUT_MILLIS = 5_000;
+    private static final long CONNECT_POLL_MILLIS = 100;
     private static PrimaryRegistry instance;
     private Client connection;
-    private final EventLoopGroup eventLoopGroup = new NioEventLoopGroup(new DefaultThreadFactory("primary-registry-worker-group"));
-    private boolean connected = false;
+    private final EventLoopGroup eventLoopGroup =
+            new NioEventLoopGroup(new DefaultThreadFactory("primary-registry-worker-group"));
+    private volatile boolean connected = false;
     private final ArchonInterface archonInterface;
-    String authenticationToken;
+    private volatile String authenticationToken;
 
-    public PrimaryRegistry(ArchonInterface archonInterface) {
+    private PrimaryRegistry(ArchonInterface archonInterface) {
         this.archonInterface = archonInterface;
     }
 
-    public static PrimaryRegistry getInstance(ArchonInterface archonInterface) {
+    public static synchronized PrimaryRegistry getInstance(ArchonInterface archonInterface) {
         if (instance == null) {
             instance = new PrimaryRegistry(archonInterface);
         }
@@ -43,48 +46,49 @@ public class PrimaryRegistry implements ClientCallback {
         connection = new Client(host, RegistryConstants.PORT, this, eventLoopGroup);
         connection.settings().setHeartbeatInterval(RegistryConstants.HEARTBEAT_INTERVAL);
         try {
-            logger.info("Connecting primary registry at {}", host);
+            LOGGER.info("Connecting primary registry at {}", host);
             connection.connect();
-            Utils.waitForCondition(() -> connected, 5_000, 100);
+            Utils.waitForCondition(() -> connected, CONNECT_TIMEOUT_MILLIS, CONNECT_POLL_MILLIS);
         } catch (TimeoutException e) {
-            logger.error("Primary registry connection timed out");
+            LOGGER.error("Primary registry connection timed out");
             throw new PrimaryRegistryConnectionFailure(e);
         } catch (Exception e) {
-            logger.error("Failed to connect to primary registry server at {}. Error: {}", host, e.getMessage());
+            LOGGER.error("Failed to connect to primary registry server at {}. Error: {}", host, e.getMessage());
             throw new PrimaryRegistryConnectionFailure(e);
         }
     }
 
     @Override
     public void onConnect(Client client) {
-        logger.info("Connected to primary registry at {}", client.getRemoteAddress());
+        LOGGER.info("Connected to primary registry at {}", client.getRemoteAddress());
         connected = true;
     }
 
     @Override
     public void onDisconnect(Client client) {
-        logger.warn("Disconnected from primary registry at {}", client.getRemoteAddress());
+        LOGGER.warn("Disconnected from primary registry at {}", client.getRemoteAddress());
         connected = false;
         archonInterface.reconnect();
     }
 
     @Override
     public void onMessage(Client client, Message message) {
-        logger.info("Received message from primary registry. {}", message.getClass().getName());
+        LOGGER.info("Received message from primary registry. {}", message.getClass().getName());
         if (message instanceof ApplicationRegistrationResponseMessage rankUpdateMessage) {
             this.authenticationToken = rankUpdateMessage.getAuthenticationToken();
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
         } else if (message instanceof ApplicationRankUpdate rankUpdateMessage) {
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
         } else if (message instanceof ApplicationTerminationMessage terminationMessage) {
-            logger.error("Received termination message from primary registry. Reason: {}", terminationMessage.getReason());
+            LOGGER.error("Received termination message from primary registry. Reason: {}",
+                    terminationMessage.getReason());
             System.exit(1);
         }
     }
 
     @Override
     public void onError(Client client, Throwable throwable) {
-        logger.warn("Primary registry client error", throwable);
+        LOGGER.warn("Primary registry client error", throwable);
     }
 
     public void sendMessage(Message message) {

@@ -1,5 +1,6 @@
 package dev.heysulo.archon.sdk.registry;
 
+import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
 import dev.heysulo.archon.sdk.constant.RegistryConstants;
@@ -18,17 +19,20 @@ import java.util.concurrent.TimeoutException;
 public class RegistryLookupService implements ClientCallback {
     private static final long LOOKUP_TIMEOUT_MILLIS = 10_000;
     private static final long LOOKUP_POLL_MILLIS = 100;
-    private static RegistryLookupService INSTANCE;
-    private final Logger logger = LoggerFactory.getLogger(RegistryLookupService.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(RegistryLookupService.class);
+    private static RegistryLookupService instance;
     private final EventLoopGroup eventLoopGroup =
             new NioEventLoopGroup(1, new DefaultThreadFactory("registry-lookup-worker", true));
     private volatile Boolean primaryRegistryFound = null;
 
-    public static RegistryLookupService getInstance() {
-        if (INSTANCE == null) {
-            INSTANCE = new RegistryLookupService();
+    private RegistryLookupService() {
+    }
+
+    public static synchronized RegistryLookupService getInstance() {
+        if (instance == null) {
+            instance = new RegistryLookupService();
         }
-        return INSTANCE;
+        return instance;
     }
 
     /**
@@ -37,7 +41,7 @@ public class RegistryLookupService implements ClientCallback {
     public String search() {
         for (String registryLocation : RegistryConstants.getRegistryLocations()) {
             if (isPrimaryRegistry(registryLocation)) {
-                logger.info("Primary registry found at {}", registryLocation);
+                LOGGER.info("Primary registry found at {}", registryLocation);
                 return registryLocation;
             }
         }
@@ -50,19 +54,19 @@ public class RegistryLookupService implements ClientCallback {
             primaryRegistryFound = null;
             lookupConnection.connect();
             lookupConnection.send(new PrimaryRegistryLookupMessage());
-            logger.info("Waiting for registry lookup response from {}", registryLocation);
+            LOGGER.info("Waiting for registry lookup response from {}", registryLocation);
             Utils.waitForCondition(() -> primaryRegistryFound != null, LOOKUP_TIMEOUT_MILLIS, LOOKUP_POLL_MILLIS);
             if (!primaryRegistryFound) {
-                logger.info("{} is not the primary registry", registryLocation);
+                LOGGER.info("{} is not the primary registry", registryLocation);
             }
             return primaryRegistryFound;
         } catch (TimeoutException e) {
-            logger.warn("Registry lookup response timed out: {}", registryLocation);
+            LOGGER.warn("Registry lookup response timed out: {}", registryLocation);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            logger.warn("Registry lookup interrupted: {}", registryLocation);
+            LOGGER.warn("Registry lookup interrupted: {}", registryLocation);
         } catch (Exception e) {
-            logger.info("Connection to registry at {} failed. Error: {}", registryLocation, e.getMessage());
+            LOGGER.info("Connection to registry at {} failed. Error: {}", registryLocation, e.getMessage());
         } finally {
             close(lookupConnection);
         }
@@ -79,23 +83,23 @@ public class RegistryLookupService implements ClientCallback {
 
     @Override
     public void onConnect(Client client) {
-        logger.info("Connected to registry at {}", client.getRemoteAddress());
+        LOGGER.info("Connected to registry at {}", client.getRemoteAddress());
     }
 
     @Override
     public void onDisconnect(Client client) {
-        logger.info("Disconnected from registry at {}", client.getRemoteAddress());
+        LOGGER.info("Disconnected from registry at {}", client.getRemoteAddress());
     }
 
     @Override
     public void onMessage(Client client, Message message) {
         if (message instanceof PrimaryRegistryLookupResponseMessage lookupResponseMessage) {
-            primaryRegistryFound = lookupResponseMessage.getRank() == 1 ? Boolean.TRUE : Boolean.FALSE;
+            primaryRegistryFound = lookupResponseMessage.getRank() == RegistryProtocol.RANK_PRIMARY;
         }
     }
 
     @Override
     public void onError(Client client, Throwable throwable) {
-        logger.error("Error on registry lookup client", throwable);
+        LOGGER.error("Error on registry lookup client", throwable);
     }
 }

@@ -3,7 +3,10 @@ package dev.heysulo.archon.sdk.utils;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 
-public class Utils {
+public final class Utils {
+    private Utils() {
+    }
+
     public static void waitForCondition(BooleanSupplier condition, long timeoutMillis, long pollInterval)
             throws InterruptedException, TimeoutException {
         long startTime = System.currentTimeMillis();

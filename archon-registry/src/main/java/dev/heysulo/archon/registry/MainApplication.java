@@ -7,15 +7,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class MainApplication {
-    private static final Logger logger = LoggerFactory.getLogger(MainApplication.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(MainApplication.class);
 
     public static void main(String[] args) throws InterruptedException {
-        logger.info("Starting Archon Registry...");
+        LOGGER.info("Starting Archon Registry...");
         MainApplication application = new MainApplication();
         try {
             application.start();
         } catch (Exception e) {
-            logger.error("Error starting Archon Registry", e);
+            LOGGER.error("Error starting Archon Registry", e);
         }
     }
 
@@ -24,6 +24,6 @@ public class MainApplication {
         registryServer.initialize();
         LeaderElectorClient.getInstance().start(Constants.REGISTRY_LEADER_ELECTION_MAX_CONNECTION_ATTEMPTS);
         registryServer.start();
-        logger.info("Archon Registry startup complete.");
+        LOGGER.info("Archon Registry startup complete.");
     }
 }
