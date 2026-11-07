@@ -1,18 +1,18 @@
 package dev.heysulo.archon.sdk.constant;
 
+import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
+
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.List;
 
-public class RegistryConstants {
-    public static final int PORT = 8080;
+public final class RegistryConstants {
+    public static final int PORT = RegistryProtocol.PORT;
     public static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(3);
 
+    private RegistryConstants() {
+    }
+
     public static List<String> getRegistryLocations() {
-        String hosts = System.getenv("ARCHON_REGISTRY_LOCATIONS");
-        if (hosts == null) {
-            return List.of();
-        }
-        return Arrays.asList(hosts.split("\\|"));
+        return RegistryProtocol.getRegistryLocations();
     }
 }

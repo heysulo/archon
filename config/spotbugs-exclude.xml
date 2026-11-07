@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Returning the shared instance is the purpose of a singleton accessor. -->
+    <Match>
+        <Bug pattern="MS_EXPOSE_REP"/>
+        <Method name="getInstance"/>
+    </Match>
+    <!-- Known design debt: a termination from the registry ends the host process. Replacing this with a callback
+         changes SDK behaviour, so it needs a deliberate decision. -->
+    <Match>
+        <Bug pattern="DM_EXIT"/>
+        <Class name="dev.heysulo.archon.sdk.registry.PrimaryRegistry"/>
+        <Method name="onMessage"/>
+    </Match>
+</FindBugsFilter>

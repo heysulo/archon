@@ -5,7 +5,10 @@ import dev.heysulo.archon.dictionary.sdk.messages.AuthenticatedMessage;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationResponse;
 
-public class Utils {
+public final class Utils {
+    private Utils() {
+    }
+
     public static AuthenticatedMessage createRegistrationResponse(Application application) {
         return new ApplicationRegistrationResponseMessage(
                 application.getGroup(),

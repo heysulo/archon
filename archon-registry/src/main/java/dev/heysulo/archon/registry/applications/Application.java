@@ -22,16 +22,16 @@ import static dev.heysulo.archon.registry.utils.Utils.createRegistrationResponse
 import static dev.heysulo.archon.registry.utils.Utils.createRegistryRegistrationResponse;
 
 public class Application implements ConnectionCallback {
-    private static final Logger logger = LoggerFactory.getLogger(Application.class);
-    private static final Map<Connection, Application> clientApplicationMap = new HashMap<>();
+    private static final Logger LOGGER = LoggerFactory.getLogger(Application.class);
+    private static final Map<Connection, Application> connectionApplications = new HashMap<>();
     private RegistryServer registryServer = null;
     private final AuthenticationManager authenticationManager = AuthenticationManager.getInstance();
-    String group;
-    String name;
-    int rank;
-    Connection client;
-    RunLevel runLevel;
-    String authenticationToken;
+    private String group;
+    private String name;
+    private int rank;
+    private Connection connection;
+    private RunLevel runLevel;
+    private String authenticationToken;
 
     public Application(String group, String name, int rank) {
         this.name = name;
@@ -64,16 +64,16 @@ public class Application implements ConnectionCallback {
         syncWithRegistryMirrors();
     }
 
-    public Connection getClient() {
-        return client;
+    public Connection getConnection() {
+        return connection;
     }
 
-    public void setClient(Connection newClient) {
-        synchronized (clientApplicationMap) {
-            clientApplicationMap.remove(this.client);
-            newClient.setCallback(this);
-            clientApplicationMap.put(newClient, this);
-            this.client = newClient;
+    public void setConnection(Connection newConnection) {
+        synchronized (connectionApplications) {
+            connectionApplications.remove(this.connection);
+            newConnection.setCallback(this);
+            connectionApplications.put(newConnection, this);
+            this.connection = newConnection;
         }
     }
 
@@ -93,15 +93,17 @@ public class Application implements ConnectionCallback {
         if (this.runLevel == newRunLevel) {
             return;
         }
-        logger.info("Updating run level of {} from {} to {}", getDisplayName(), runLevel, newRunLevel);
+        LOGGER.info("Updating run level of {} from {} to {}", getDisplayName(), runLevel, newRunLevel);
         this.runLevel = newRunLevel;
         syncWithRegistryMirrors();
     }
 
-    public void handleRegistration(Connection client) {
-        setClient(client);
+    public void handleRegistration(Connection connection) {
+        setConnection(connection);
         setRunLevel(RunLevel.STARTING);
-        AuthenticatedMessage registrationResponse = isRegistryInstance() ? createRegistryRegistrationResponse(this) : createRegistrationResponse(this);
+        AuthenticatedMessage registrationResponse = isRegistryInstance()
+                ? createRegistryRegistrationResponse(this)
+                : createRegistrationResponse(this);
         this.authenticationToken = authenticationManager.generateSecureToken();
         registrationResponse.setAuthenticationToken(this.authenticationToken);
         send(registrationResponse);
@@ -113,13 +115,13 @@ public class Application implements ConnectionCallback {
     }
 
     public void send(Message message) {
-        client.send(message);
+        connection.send(message);
     }
 
     @Override
-    public void onDisconnect(Connection client) {
+    public void onDisconnect(Connection connection) {
         ApplicationManager.withNamespaceLock(group, name, () -> {
-            logger.warn("{} disconnected from registry server.", this.getDisplayName());
+            LOGGER.warn("{} disconnected from registry server.", this.getDisplayName());
             setRunLevel(RunLevel.KILLED);
             if (rank == RANK_PRIMARY) {
                 ApplicationManager.getInstance().electLeader(group, name);
@@ -128,8 +130,9 @@ public class Application implements ConnectionCallback {
     }
 
     @Override
-    public void onMessage(Connection client, Message message) {
-        logger.info("Received message from {} type {}", client.getRemoteAddress(), message.getClass().getSimpleName());
+    public void onMessage(Connection connection, Message message) {
+        LOGGER.info("Received message from {} type {}", connection.getRemoteAddress(),
+                message.getClass().getSimpleName());
         if (message instanceof ApplicationRankUpdate rankUpdate) {
             handleApplicationRankUpdate(rankUpdate);
         }
@@ -140,14 +143,16 @@ public class Application implements ConnectionCallback {
 
     private void handleApplicationSyncMessage(ApplicationSyncMessage syncMessage) {
         ApplicationManager applicationManager = ApplicationManager.getInstance();
-        Application application;
-        application = applicationManager.findApplication(syncMessage.getGroup(), syncMessage.getName(), syncMessage.getRank());
+        String group = syncMessage.getGroup();
+        String name = syncMessage.getName();
+        int rank = syncMessage.getRank();
+        Application application = applicationManager.findApplication(group, name, rank);
         if (application == null) {
-            application = applicationManager.createApplication(syncMessage.getGroup(), syncMessage.getName(), syncMessage.getRank());
+            application = applicationManager.createApplication(group, name, rank);
         }
         application.setAuthenticationToken(syncMessage.getAuthenticationToken());
         application.setRunLevel(syncMessage.getRunLevel());
-        logger.info("Synced application {}. Run Level: {}", application.getDisplayName(), application.getRunLevel());
+        LOGGER.info("Synced application {}. Run Level: {}", application.getDisplayName(), application.getRunLevel());
     }
 
     private void handleApplicationRankUpdate(ApplicationRankUpdate rankUpdate) {
@@ -162,9 +167,9 @@ public class Application implements ConnectionCallback {
     }
 
     private void askToDie(String reason) {
-        logger.error("Asking {} to die. Reason: {}", getDisplayName(), reason);
+        LOGGER.error("Asking {} to die. Reason: {}", getDisplayName(), reason);
         try {
-            client.disconnect();
+            connection.disconnect();
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -172,29 +177,29 @@ public class Application implements ConnectionCallback {
     }
 
     @Override
-    public void onError(Connection client, Throwable throwable) {
-
+    public void onError(Connection connection, Throwable throwable) {
+        LOGGER.warn("Connection error on {}", getDisplayName(), throwable);
     }
 
-    public static Application getApplication(Connection client) {
-        synchronized (clientApplicationMap) {
-            return clientApplicationMap.get(client);
+    public static Application getApplication(Connection connection) {
+        synchronized (connectionApplications) {
+            return connectionApplications.get(connection);
         }
     }
 
     public boolean promote() {
         if (runLevel != RunLevel.RUNNING || !isConnected()) {
-            logger.warn("Cannot promote {} — not running or disconnected (runLevel={}, connected={})",
+            LOGGER.warn("Cannot promote {} — not running or disconnected (runLevel={}, connected={})",
                     getDisplayName(), runLevel, isConnected());
             return false;
         }
-        logger.info("Promoting application {} to Primary", getDisplayName());
+        LOGGER.info("Promoting application {} to Primary", getDisplayName());
         setRank(RANK_PRIMARY);
         setRunLevel(RunLevel.CHANGING);
         try {
             send(new ApplicationRankUpdate(RANK_PRIMARY));
         } catch (Exception e) {
-            logger.error("Failed to send promotion to {}. Reverting.", getDisplayName(), e);
+            LOGGER.error("Failed to send promotion to {}. Reverting.", getDisplayName(), e);
             setRunLevel(RunLevel.KILLED);
             return false;
         }
@@ -210,7 +215,7 @@ public class Application implements ConnectionCallback {
     }
 
     public boolean isConnected() {
-        return client != null && client.isConnected();
+        return connection != null && connection.isConnected();
     }
 
     public boolean isRunning() {
@@ -227,7 +232,7 @@ public class Application implements ConnectionCallback {
 
     private void syncWithRegistryMirrors() {
         if (registryServer == null) {
-            logger.warn(">>>>>>> Registry server is not initialized. Cannot sync {} with registry mirrors", getDisplayName());
+            LOGGER.warn("Registry server is not initialized. Cannot sync {} with registry mirrors", getDisplayName());
             return;
         }
         if (RegistryServer.getRank() != RANK_PRIMARY) {
@@ -235,7 +240,7 @@ public class Application implements ConnectionCallback {
         }
         ApplicationSyncMessage message = new ApplicationSyncMessage(this);
         registryServer.getActiveMirrorApplications().forEach(app -> {
-            logger.info("Syncing {} with {}", getDisplayName(), app.getDisplayName());
+            LOGGER.info("Syncing {} with {}", getDisplayName(), app.getDisplayName());
             app.send(message);
         });
     }

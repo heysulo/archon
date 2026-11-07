@@ -8,21 +8,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class RegistryApplication extends Application {
-    private static final Logger logger = LoggerFactory.getLogger(RegistryApplication.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(RegistryApplication.class);
 
     public RegistryApplication(String group, String name, int rank) {
         super(group, name, rank);
     }
 
     @Override
-    public void onDisconnect(Connection client) {
+    public void onDisconnect(Connection connection) {
         if (getRank() != Constants.RANK_PRIMARY) {
-            logger.warn("{} disconnected", getDisplayName());
+            LOGGER.warn("{} disconnected", getDisplayName());
             setRunLevel(RunLevel.KILLED);
             return;
         }
 
-        logger.error("Disconnected from the primary registry");
+        LOGGER.error("Disconnected from the primary registry");
         RegistryServer.getInstance().handlePrimaryLost();
     }
 }
