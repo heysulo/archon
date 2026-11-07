@@ -15,7 +15,7 @@ import static dev.heysulo.archon.sdk.constant.Constants.RANK_UNKNOWN;
 
 public class ArchonInterface {
     private static final Logger logger = LoggerFactory.getLogger(ArchonInterface.class);
-    private static final long RECONNECT_RETRY_DELAY_MILLIS = 1_000;
+    private static final long PRIMARY_LOOKUP_RETRY_DELAY_MILLIS = 1_000;
     private static ArchonInterface INSTANCE;
     private PrimaryRegistry primaryRegistry;
     String primaryRegistryLocation;
@@ -45,7 +45,10 @@ public class ArchonInterface {
     private void setupPrimaryRegistryConnection() {
         RegistryLookupService registryLookupService = RegistryLookupService.getInstance();
         logger.info("Looking for primary registry");
-        primaryRegistryLocation = registryLookupService.search();
+        primaryRegistryLocation = waitForPrimaryRegistry(registryLookupService);
+        if (primaryRegistryLocation == null) {
+            throw new PrimaryRegistryCommunicationFailure("PRIMARY_REGISTRY_LOOKUP", new InterruptedException());
+        }
         logger.info("Creating primary registry connection with {}", primaryRegistryLocation);
         primaryRegistry = PrimaryRegistry.getInstance(this);
         primaryRegistry.connect(primaryRegistryLocation);
@@ -53,14 +56,10 @@ public class ArchonInterface {
 
     public void reconnect() {
         logger.info("[Reconnect] Looking for primary registry");
-        primaryRegistryLocation = null;
-        RegistryLookupService registryLookupService = RegistryLookupService.getInstance();
-        while (primaryRegistryLocation == null) {
-            primaryRegistryLocation = registryLookupService.search();
-            if (primaryRegistryLocation == null && !waitBeforeRetrying()) {
-                logger.warn("[Reconnect] Interrupted while looking for primary registry");
-                return;
-            }
+        primaryRegistryLocation = waitForPrimaryRegistry(RegistryLookupService.getInstance());
+        if (primaryRegistryLocation == null) {
+            logger.warn("[Reconnect] Interrupted while looking for primary registry");
+            return;
         }
         logger.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
         primaryRegistry.connect(primaryRegistryLocation);
@@ -69,9 +68,26 @@ public class ArchonInterface {
         primaryRegistry.sendMessage(registrationMessage);
     }
 
+    /**
+     * Blocks until a primary registry is found, as applications and registries can start in any order.
+     *
+     * @return the primary's location, or {@code null} if interrupted
+     */
+    private String waitForPrimaryRegistry(RegistryLookupService registryLookupService) {
+        String location = registryLookupService.search();
+        while (location == null) {
+            logger.info("No primary registry available. Retrying in {} ms", PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
+            if (!waitBeforeRetrying()) {
+                return null;
+            }
+            location = registryLookupService.search();
+        }
+        return location;
+    }
+
     private boolean waitBeforeRetrying() {
         try {
-            Thread.sleep(RECONNECT_RETRY_DELAY_MILLIS);
+            Thread.sleep(PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
