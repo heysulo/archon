@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/http";
 
 export type ConfigLevel = "GLOBAL" | "GROUP" | "APPLICATION";
@@ -21,10 +21,38 @@ export interface Config {
 
 export type ConfigInput = Omit<Config, "id" | "updatedAt" | "updatedBy">;
 
+/** One page of configurations, and how many match in all. */
+export interface ConfigPage {
+  items: Config[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface ConfigFilter {
+  query: string;
+  level: ConfigLevel | null;
+  page: number;
+  pageSize: number;
+}
+
 const CONFIGS = ["configs"] as const;
 
-export function useConfigs() {
-  return useQuery({ queryKey: CONFIGS, queryFn: () => api<Config[]>("/api/configs") });
+export function configsPath({ query, level, page, pageSize }: ConfigFilter): string {
+  const params = new URLSearchParams({ offset: String((page - 1) * pageSize), limit: String(pageSize) });
+  if (query.trim()) params.set("q", query.trim());
+  if (level) params.set("level", level);
+  return `/api/configs?${params}`;
+}
+
+/** Searched and paged by the portal, which holds every configuration in memory. */
+export function useConfigs(filter: ConfigFilter) {
+  return useQuery({
+    queryKey: [...CONFIGS, filter],
+    queryFn: () => api<ConfigPage>(configsPath(filter)),
+    // Keeps the current page on screen while the next one loads
+    placeholderData: keepPreviousData,
+  });
 }
 
 /** Every change refreshes the list afterwards, so it shows what archon-config stored. */

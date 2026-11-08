@@ -1,31 +1,28 @@
 package dev.heysulo.archon.dictionary.sdk.messages;
 
-import dev.heysulo.archon.dictionary.sdk.config.ConfigEntry;
 import dev.heysulo.databridge.core.common.Message;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/** Whether archon-config accepted the caller, and if so every configuration it can see, most specific per name. */
+/**
+ * Whether archon-config accepted the caller. Accepted applications then receive {@link ConfigSnapshot} pieces, and
+ * replicas {@link ConfigRows}.
+ */
 public class ConfigHelloResponse implements Message {
     private static final long serialVersionUID = 1L;
 
     private final boolean accepted;
     private final String reason;
-    private final ArrayList<ConfigEntry> entries;
 
-    private ConfigHelloResponse(boolean accepted, String reason, List<ConfigEntry> entries) {
+    private ConfigHelloResponse(boolean accepted, String reason) {
         this.accepted = accepted;
         this.reason = reason;
-        this.entries = new ArrayList<>(entries);
     }
 
-    public static ConfigHelloResponse accepted(List<ConfigEntry> entries) {
-        return new ConfigHelloResponse(true, null, entries);
+    public static ConfigHelloResponse accepted() {
+        return new ConfigHelloResponse(true, null);
     }
 
     public static ConfigHelloResponse refused(String reason) {
-        return new ConfigHelloResponse(false, reason, List.of());
+        return new ConfigHelloResponse(false, reason);
     }
 
     public boolean isAccepted() {
@@ -34,9 +31,5 @@ public class ConfigHelloResponse implements Message {
 
     public String getReason() {
         return reason;
-    }
-
-    public List<ConfigEntry> getEntries() {
-        return List.copyOf(entries);
     }
 }

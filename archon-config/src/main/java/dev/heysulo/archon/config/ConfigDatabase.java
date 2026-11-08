@@ -26,6 +26,7 @@ public final class ConfigDatabase implements AutoCloseable {
     private static final String SCHEMA = "/db/config-schema.sql";
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigDatabase.class);
     private static final int MIGRATE_ATTEMPTS = 10;
+    static final String REVISION_INDEX = "configurations_by_revision";
     private static final long MIGRATE_RETRY_MILLIS = 3_000;
 
     private final HikariDataSource dataSource;
@@ -79,6 +80,7 @@ public final class ConfigDatabase implements AutoCloseable {
                 for (String sql : statements) {
                     statement.execute(sql);
                 }
+                ensureRevisionIndex(connection, statement);
                 LOGGER.info("Configuration tables ready in {}", description);
                 return;
             } catch (java.sql.SQLSyntaxErrorException e) {
@@ -94,6 +96,24 @@ public final class ConfigDatabase implements AutoCloseable {
             }
         }
         throw new IllegalStateException("Cannot prepare the configuration tables in " + description, lastFailure);
+    }
+
+    /**
+     * Every replica asks for the rows after a revision, now and then and after each write. Without this index each
+     * ask reads the whole table. Added here rather than in the schema file because MySQL has no
+     * {@code CREATE INDEX IF NOT EXISTS}, and tables made before it existed need it too.
+     */
+    private static void ensureRevisionIndex(Connection connection, Statement statement) throws SQLException {
+        try (java.sql.ResultSet indexes = connection.getMetaData().getIndexInfo(connection.getCatalog(),
+                connection.getSchema(), "configurations", false, true)) {
+            while (indexes.next()) {
+                if (REVISION_INDEX.equalsIgnoreCase(indexes.getString("INDEX_NAME"))) {
+                    return;
+                }
+            }
+        }
+        statement.execute("CREATE INDEX " + REVISION_INDEX + " ON configurations (revision)");
+        LOGGER.info("Added the {} index", REVISION_INDEX);
     }
 
     /** The schema's statements: everything between semicolons, without comment lines. */

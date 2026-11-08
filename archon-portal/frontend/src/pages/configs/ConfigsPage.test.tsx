@@ -1,6 +1,7 @@
 import { screen } from "@testing-library/react";
 import { mockPortal, renderWith } from "../../test/render";
 import { ConfigsPage } from "./ConfigsPage";
+import { configsPath } from "./configsApi";
 
 const CONFIGS = [
   { id: 1, level: "GLOBAL", group: "", application: "", name: "ping.intervalMillis", type: "INTEGER", value: "1000",
@@ -11,7 +12,20 @@ const CONFIGS = [
 ];
 
 describe("ConfigsPage", () => {
-  beforeEach(() => mockPortal({ "GET /api/configs": { body: CONFIGS } }));
+  it("asks the portal for one page, filtered by level", async () => {
+    expect(configsPath({ query: " ping ", level: "GROUP", page: 3, pageSize: 50 }))
+      .toBe("/api/configs?offset=100&limit=50&q=ping&level=GROUP");
+    expect(configsPath({ query: "", level: null, page: 1, pageSize: 50 })).toBe("/api/configs?offset=0&limit=50");
+  });
+
+  it("shows where the page is in the whole list", async () => {
+    mockPortal({ "GET /api/configs": { body: { items: CONFIGS, total: 120, offset: 0, limit: 50 } } });
+    renderWith(<ConfigsPage />);
+    expect(await screen.findByText(/of 120/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "3" })).toBeInTheDocument();
+  });
+
+  beforeEach(() => mockPortal({ "GET /api/configs": { body: { items: CONFIGS, total: 2, offset: 0, limit: 50 } } }));
 
   it("lists configurations with who sees them", async () => {
     renderWith(<ConfigsPage />);

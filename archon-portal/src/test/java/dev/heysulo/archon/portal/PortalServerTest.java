@@ -2,6 +2,8 @@ package dev.heysulo.archon.portal;
 
 import dev.heysulo.archon.dictionary.sdk.config.ConfigEntry;
 import dev.heysulo.archon.dictionary.sdk.config.ConfigLevel;
+import dev.heysulo.archon.dictionary.sdk.config.ConfigRow;
+import dev.heysulo.archon.dictionary.sdk.config.ConfigType;
 import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 import dev.heysulo.archon.dictionary.sdk.services.ProcessInfo;
 import dev.heysulo.archon.portal.auth.AuthService;
@@ -9,6 +11,7 @@ import dev.heysulo.archon.portal.auth.PasswordHasher;
 import dev.heysulo.archon.portal.auth.Permission;
 import dev.heysulo.archon.portal.auth.TestDatabase;
 import dev.heysulo.archon.sdk.config.ConfigAdmin;
+import dev.heysulo.archon.sdk.config.ConfigReplica;
 import dev.heysulo.archon.sdk.config.ConfigurationException;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
@@ -60,7 +63,7 @@ public class PortalServerTest {
         AuthService auth = new AuthService(database.store(), new PasswordHasher(1_000), Clock.systemUTC());
         auth.completeSetup(auth.createSetupToken().orElseThrow(), "admin", "Admin", ADMIN_PASSWORD);
         server = new PortalServer(feed, snapshot -> snapshot.servedBy(identity), "/portal-test", new AuthApi(auth),
-                new ConfigApi(() -> configs, auth::authenticate), auth::authenticate);
+                new ConfigApi(configs, auth::authenticate), auth::authenticate);
         server.start(port);
         adminCookie = signIn("admin", ADMIN_PASSWORD);
     }
@@ -73,8 +76,9 @@ public class PortalServerTest {
 
     @BeforeMethod
     public void registryUp() {
-        configs.entries.clear();
+        configs.clear();
         configs.failure = null;
+        configs.synced = true;
         feed.snapshot = ProcessSnapshot.of("10.21.3.202", 3, List.of(LEADER, STOPPED));
     }
 
@@ -182,16 +186,17 @@ public class PortalServerTest {
         HttpResponse<String> created = post("/api/configs", body, adminCookie, true);
         Assert.assertEquals(created.statusCode(), 201, created.body());
         Assert.assertEquals(configs.lastActor, "admin");
-        Assert.assertEquals(configs.entries.get(0).level(), ConfigLevel.GROUP);
-        Assert.assertTrue(configs.entries.get(0).readOnly());
+        ConfigEntry stored = configs.replica.entries().iterator().next();
+        Assert.assertEquals(stored.level(), ConfigLevel.GROUP);
+        Assert.assertTrue(stored.readOnly());
         Assert.assertTrue(get("/api/configs", adminCookie).body().contains("\"name\":\"ping.intervalMillis\""));
 
-        long id = configs.entries.get(0).id();
+        long id = stored.id();
         HttpResponse<String> updated = send("PUT", "/api/configs/" + id, body.replace("500", "750"), adminCookie);
         Assert.assertEquals(updated.statusCode(), 200, updated.body());
-        Assert.assertEquals(configs.entries.get(0).value(), "750");
+        Assert.assertEquals(configs.replica.get(id).orElseThrow().value(), "750");
         Assert.assertEquals(send("DELETE", "/api/configs/" + id, null, adminCookie).statusCode(), 204);
-        Assert.assertTrue(configs.entries.isEmpty());
+        Assert.assertEquals(configs.replica.size(), 0);
     }
 
     @Test
@@ -209,19 +214,44 @@ public class PortalServerTest {
     public void refusesConfigurationChangesFromOtherSites() throws Exception {
         Assert.assertEquals(post("/api/configs", "{\"level\":\"GLOBAL\",\"name\":\"x\",\"type\":\"STRING\"}",
                 adminCookie, false).statusCode(), 403);
-        Assert.assertTrue(configs.entries.isEmpty());
+        Assert.assertEquals(configs.replica.size(), 0);
     }
 
     @Test
     public void reportsAnUnreachableConfigServerAs503AndRefusalsAs400() throws Exception {
+        String body = "{\"level\":\"GLOBAL\",\"name\":\"x\",\"type\":\"STRING\",\"value\":\"\"}";
         configs.failure = ConfigurationException.unavailable("archon-config is not reachable", null);
-        Assert.assertEquals(get("/api/configs", adminCookie).statusCode(), 503);
+        Assert.assertEquals(post("/api/configs", body, adminCookie, true).statusCode(), 503);
         configs.failure = new ConfigurationException("Value is not a whole number");
-        HttpResponse<String> refused = get("/api/configs", adminCookie);
+        HttpResponse<String> refused = post("/api/configs", body, adminCookie, true);
         Assert.assertEquals(refused.statusCode(), 400);
         Assert.assertTrue(refused.body().contains("not a whole number"), refused.body());
         configs.failure = null;
+        configs.synced = false;
+        Assert.assertEquals(get("/api/configs", adminCookie).statusCode(), 503, "still loading");
+        configs.synced = true;
         Assert.assertEquals(post("/api/configs", "{\"level\":\"nowhere\"}", adminCookie, true).statusCode(), 400);
+    }
+
+    @Test
+    public void servesConfigurationsOnePageAtATime() throws Exception {
+        configs.add(120);
+        HttpResponse<String> first = get("/api/configs?limit=50", adminCookie);
+        Assert.assertEquals(first.statusCode(), 200, first.body());
+        Assert.assertTrue(first.body().contains("\"total\":120"), first.body());
+        Assert.assertTrue(first.body().contains("\"name\":\"name.00000\""));
+        Assert.assertFalse(first.body().contains("\"name\":\"name.00050\""));
+
+        HttpResponse<String> third = get("/api/configs?offset=100&limit=50", adminCookie);
+        Assert.assertTrue(third.body().contains("\"name\":\"name.00119\""), third.body());
+        Assert.assertFalse(third.body().contains("\"name\":\"name.00099\""));
+
+        HttpResponse<String> searched = get("/api/configs?q=NAME.0011&level=global", adminCookie);
+        Assert.assertTrue(searched.body().contains("\"total\":10"), searched.body());
+        Assert.assertTrue(get("/api/configs?level=GROUP", adminCookie).body().contains("\"total\":0"));
+        Assert.assertEquals(get("/api/configs?limit=lots", adminCookie).statusCode(), 400);
+        Assert.assertTrue(get("/api/configs?limit=100000", adminCookie).body().contains("\"limit\":200"),
+                "pages are capped");
     }
 
     // ---------------- processes ----------------
@@ -431,43 +461,68 @@ public class PortalServerTest {
         }
     }
 
-    /** archon-config's management interface, held in memory. */
-    private static final class FakeConfigs implements ConfigAdmin {
-        private final List<ConfigEntry> entries = new CopyOnWriteArrayList<>();
+    /** archon-config, in memory: each change is pushed back into the portal's replica, as the primary does. */
+    private static final class FakeConfigs implements ConfigApi.Source, ConfigAdmin {
+        private final ConfigReplica replica = new ConfigReplica();
         private volatile ConfigurationException failure;
         private volatile String lastActor;
+        private volatile boolean synced = true;
         private long nextId = 1;
+        private long revision;
 
         @Override
-        public List<ConfigEntry> list() {
+        public ConfigReplica replica() {
+            return replica;
+        }
+
+        @Override
+        public boolean synced() {
+            return synced;
+        }
+
+        @Override
+        public ConfigAdmin admin() {
             check();
-            return List.copyOf(entries);
+            return this;
         }
 
         @Override
         public synchronized ConfigEntry create(ConfigEntry entry, String actor) {
-            check();
-            lastActor = actor;
             ConfigEntry stored = new ConfigEntry(nextId++, entry.level(), entry.group(), entry.application(),
                     entry.name(), entry.type(), entry.value(), entry.readOnly(), entry.description(), "now", actor);
-            entries.add(stored);
-            return stored;
+            return push(stored, false, actor);
         }
 
         @Override
         public synchronized ConfigEntry update(ConfigEntry entry, String actor) {
-            check();
-            lastActor = actor;
-            entries.removeIf(existing -> existing.id() == entry.id());
-            entries.add(entry);
-            return entry;
+            ConfigEntry current = replica.get(entry.id()).orElseThrow();
+            return push(new ConfigEntry(current.id(), current.level(), current.group(), current.application(),
+                    current.name(), entry.type(), entry.value(), entry.readOnly(), entry.description(), "now", actor),
+                    false, actor);
         }
 
         @Override
-        public void delete(long id, String actor) {
-            check();
+        public synchronized void delete(long id, String actor) {
+            push(replica.get(id).orElseThrow(), true, actor);
+        }
+
+        synchronized void add(int count) {
+            for (int i = 0; i < count; i++) {
+                create(new ConfigEntry(0, ConfigLevel.GLOBAL, "", "", String.format("name.%05d", i), ConfigType.INTEGER,
+                        String.valueOf(i), false, "", null, null), "seed");
+            }
+        }
+
+        void clear() {
+            replica.replace(List.of(), 0);
+            revision = 0;
+        }
+
+        private ConfigEntry push(ConfigEntry entry, boolean deleted, String actor) {
             lastActor = actor;
-            entries.removeIf(existing -> existing.id() == id);
+            revision++;
+            replica.apply(List.of(new ConfigRow(entry, deleted, revision)), revision);
+            return entry;
         }
 
         private void check() {

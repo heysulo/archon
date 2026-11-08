@@ -6,6 +6,8 @@ import dev.heysulo.archon.dictionary.sdk.messages.ConfigHello;
 import dev.heysulo.archon.dictionary.sdk.messages.ConfigHelloResponse;
 import dev.heysulo.archon.dictionary.sdk.messages.ConfigRequest;
 import dev.heysulo.archon.dictionary.sdk.messages.ConfigResponse;
+import dev.heysulo.archon.dictionary.sdk.messages.ConfigRows;
+import dev.heysulo.archon.dictionary.sdk.messages.ConfigSnapshot;
 import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.ConnectionCallback;
 import dev.heysulo.databridge.core.common.Message;
@@ -57,9 +59,9 @@ public class ConfigServerTest {
     @Test
     public void sendsWhatTheApplicationSeesOnceVerified() throws Exception {
         FakeConnection shop = connect("Shop", "Cart", TOKEN);
-        ConfigHelloResponse hello = shop.next(ConfigHelloResponse.class);
-        Assert.assertTrue(hello.isAccepted());
-        Assert.assertEquals(hello.getEntries().get(0).name(), "limit");
+        ConfigSnapshot snapshot = accept(shop);
+        Assert.assertTrue(snapshot.isLast());
+        Assert.assertEquals(snapshot.getEntries().get(0).name(), "limit");
 
         service.create(entry(GROUP, "Shop", "", "limit", INTEGER, "50", false), "admin");
         ConfigChanged changed = shop.next(ConfigChanged.class);
@@ -88,19 +90,20 @@ public class ConfigServerTest {
     public void refusesRequestsBeforeTheHello() throws Exception {
         FakeConnection anyone = new FakeConnection();
         server.onConnect(null, anyone);
-        server.onMessage(null, anyone, new ConfigRequest(1, ConfigRequest.Operation.LIST_ALL, null, null));
+        server.onMessage(null, anyone, new ConfigRequest(1, ConfigRequest.Operation.SET, null, null));
         Assert.assertFalse(anyone.next(ConfigResponse.class).isOk());
     }
 
     @Test
     public void onlyThePortalManagesConfigurations() throws Exception {
         FakeConnection shop = connect("Shop", "Cart", TOKEN);
-        shop.next(ConfigHelloResponse.class);
-        server.onMessage(null, shop, new ConfigRequest(1, ConfigRequest.Operation.LIST_ALL, null, null));
+        accept(shop);
+        server.onMessage(null, shop, new ConfigRequest(1, ConfigRequest.Operation.DELETE,
+                entry(GLOBAL, "", "", "limit", INTEGER, "1", false), null));
         Assert.assertFalse(shop.next(ConfigResponse.class).isOk());
 
         FakeConnection portal = connect(ConfigServer.PORTAL_GROUP, ConfigServer.PORTAL_NAME, TOKEN);
-        portal.next(ConfigHelloResponse.class);
+        accept(portal);
         server.onMessage(null, portal, new ConfigRequest(2, ConfigRequest.Operation.CREATE,
                 entry(GROUP, "Shop", "", "currency", STRING,
                         "EUR", true), "dana"));
@@ -112,7 +115,7 @@ public class ConfigServerTest {
     @Test
     public void applicationsSetTheirOwnValues() throws Exception {
         FakeConnection shop = connect("Shop", "Cart", TOKEN);
-        shop.next(ConfigHelloResponse.class);
+        accept(shop);
         server.onMessage(null, shop, new ConfigRequest(1, ConfigRequest.Operation.SET,
                 new ConfigEntry(0, null, null, null, "limit", null, "120", false, null, null, null), null));
         // The change is pushed to the setter too, like to every caller that sees it, before the answer
@@ -125,10 +128,50 @@ public class ConfigServerTest {
     @Test
     public void stopsPushingOnceDisconnected() throws Exception {
         FakeConnection shop = connect("Shop", "Cart", TOKEN);
-        shop.next(ConfigHelloResponse.class);
+        accept(shop);
         server.onDisconnect(null, shop);
         Assert.assertEquals(service.subscriberCount(), 0);
         Assert.assertEquals(server.sessionCount(), 0);
+    }
+
+    @Test
+    public void sendsThePortalEveryRowThenEachChange() throws Exception {
+        FakeConnection portal = new FakeConnection();
+        server.onConnect(null, portal);
+        server.onMessage(null, portal, new ConfigHello(ConfigServer.PORTAL_GROUP, ConfigServer.PORTAL_NAME, 1, TOKEN,
+                true, 0));
+        Assert.assertTrue(portal.next(ConfigHelloResponse.class).isAccepted());
+        ConfigRows all = portal.next(ConfigRows.class);
+        Assert.assertTrue(all.isReset());
+        Assert.assertEquals(all.getRows().get(0).entry().name(), "limit");
+
+        // Even for configurations no application sees
+        service.create(entry(GROUP, "Nobody", "", "orphan", INTEGER, "1", false), "admin");
+        Assert.assertEquals(portal.next(ConfigRows.class).getRows().get(0).entry().name(), "orphan");
+    }
+
+    @Test
+    public void letsArchonConfigMirrorsReplicate() throws Exception {
+        FakeConnection mirror = new FakeConnection();
+        server.onConnect(null, mirror);
+        server.onMessage(null, mirror, new ConfigHello(ConfigServer.PORTAL_GROUP, ConfigServer.CONFIG_NAME, 2, TOKEN,
+                true, 0));
+        Assert.assertTrue(mirror.next(ConfigHelloResponse.class).isAccepted());
+        Assert.assertTrue(mirror.next(ConfigRows.class).isLast());
+    }
+
+    @Test
+    public void refusesEverythingToApplications() throws Exception {
+        FakeConnection shop = new FakeConnection();
+        server.onConnect(null, shop);
+        server.onMessage(null, shop, new ConfigHello("Shop", "Cart", 1, TOKEN, true, 0));
+        Assert.assertFalse(shop.next(ConfigHelloResponse.class).isAccepted());
+        Assert.assertEquals(service.replicaCount(), 0);
+    }
+
+    private ConfigSnapshot accept(FakeConnection connection) throws InterruptedException {
+        Assert.assertTrue(connection.next(ConfigHelloResponse.class).isAccepted());
+        return connection.next(ConfigSnapshot.class);
     }
 
     private FakeConnection connect(String group, String name, String token) {

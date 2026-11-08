@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 final class ConfigServer implements ServerCallback {
     static final String PORTAL_GROUP = "Archon";
     static final String PORTAL_NAME = "Portal";
+    static final String CONFIG_NAME = "Config";
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigServer.class);
 
     private final ConfigService service;
@@ -40,9 +41,10 @@ final class ConfigServer implements ServerCallback {
         private volatile String name;
         private volatile boolean verifying;
         private volatile ConfigService.Subscriber subscriber;
+        private volatile ConfigService.Replica replica;
 
         boolean verified() {
-            return subscriber != null;
+            return subscriber != null || replica != null;
         }
 
         boolean isPortal() {
@@ -64,8 +66,8 @@ final class ConfigServer implements ServerCallback {
     @Override
     public void onDisconnect(Server server, Connection connection) {
         Session session = sessions.remove(connection);
-        if (session != null && session.subscriber != null) {
-            service.unsubscribe(session.subscriber);
+        if (session != null) {
+            unsubscribe(session);
         }
     }
 
@@ -105,25 +107,52 @@ final class ConfigServer implements ServerCallback {
                 connection.send(ConfigHelloResponse.refused(reason));
                 return;
             }
-            session.group = hello.getGroup();
-            session.name = hello.getName();
-            ConfigService.Subscriber subscriber = new ConfigService.Subscriber(hello.getGroup(), hello.getName(),
-                    connection::send);
-            List<ConfigEntry> entries = service.subscribe(subscriber);
-            session.subscriber = subscriber;
-            if (!sessions.containsKey(connection)) {
-                // Closed while being verified
-                service.unsubscribe(subscriber);
+            if (hello.isEverything() && !mayReplicate(hello.getGroup(), hello.getName())) {
+                LOGGER.warn("Refused {}/{}: only the portal and archon-config receive every configuration",
+                        hello.getGroup(), hello.getName());
+                connection.send(ConfigHelloResponse.refused("Only Archon's portal and configuration servers receive "
+                        + "every configuration"));
                 return;
             }
-            connection.send(ConfigHelloResponse.accepted(entries));
-            LOGGER.info("{}/{} rank {} connected and sees {} configurations", hello.getGroup(), hello.getName(),
-                    hello.getRank(), entries.size());
+            session.group = hello.getGroup();
+            session.name = hello.getName();
+            // Accepted first; the service then sends what the caller needs and adds it to its listeners in one step
+            connection.send(ConfigHelloResponse.accepted());
+            if (hello.isEverything()) {
+                ConfigService.Replica replica = new ConfigService.Replica(connection::send);
+                session.replica = replica;
+                service.subscribeReplica(replica, hello.getSinceRevision());
+                LOGGER.info("{}/{} rank {} replicating from revision {}", hello.getGroup(), hello.getName(),
+                        hello.getRank(), hello.getSinceRevision());
+            } else {
+                ConfigService.Subscriber subscriber = new ConfigService.Subscriber(hello.getGroup(), hello.getName(),
+                        connection::send);
+                session.subscriber = subscriber;
+                service.subscribe(subscriber);
+                LOGGER.info("{}/{} rank {} connected", hello.getGroup(), hello.getName(), hello.getRank());
+            }
+            if (!sessions.containsKey(connection)) {
+                // Closed while being verified
+                unsubscribe(session);
+            }
         } catch (RuntimeException e) {
             LOGGER.error("Hello from {}/{} failed", hello.getGroup(), hello.getName(), e);
             connection.send(ConfigHelloResponse.refused("Something went wrong; try again shortly"));
         } finally {
             session.verifying = false;
+        }
+    }
+
+    private static boolean mayReplicate(String group, String name) {
+        return PORTAL_GROUP.equals(group) && (PORTAL_NAME.equals(name) || CONFIG_NAME.equals(name));
+    }
+
+    private void unsubscribe(Session session) {
+        if (session.subscriber != null) {
+            service.unsubscribe(session.subscriber);
+        }
+        if (session.replica != null) {
+            service.unsubscribe(session.replica);
         }
     }
 
@@ -147,7 +176,6 @@ final class ConfigServer implements ServerCallback {
             }
             String actor = request.getActor() == null || request.getActor().isBlank() ? "portal" : request.getActor();
             return switch (operation) {
-                case LIST_ALL -> ConfigResponse.ok(id, service.listAll());
                 case CREATE -> ConfigResponse.ok(id, List.of(service.create(entry, actor)));
                 case UPDATE -> ConfigResponse.ok(id, List.of(service.update(entry, actor)));
                 case DELETE -> {

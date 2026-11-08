@@ -9,22 +9,27 @@ import dev.heysulo.archon.portal.auth.AuthService;
 import dev.heysulo.archon.portal.auth.Permission;
 import dev.heysulo.archon.portal.auth.Principal;
 import dev.heysulo.archon.sdk.config.ConfigAdmin;
+import dev.heysulo.archon.sdk.config.ConfigReplica;
 import dev.heysulo.archon.sdk.config.ConfigurationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Configurations, managed through archon-config as the portal's own verified identity:
  * <ul>
- *     <li>{@code GET /api/configs} every configuration at every level ({@code configs:view})</li>
+ *     <li>{@code GET /api/configs?q=&level=&offset=&limit=} one page of configurations at every level, from this
+ *     replica's memory, with the total matching ({@code configs:view})</li>
  *     <li>{@code POST /api/configs}, {@code PUT /api/configs/{id}}, {@code DELETE /api/configs/{id}}
  *     ({@code configs:manage}), recorded as made by the signed-in user</li>
  * </ul>
@@ -32,15 +37,30 @@ import java.util.regex.Pattern;
 final class ConfigApi {
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigApi.class);
     private static final Pattern CONFIG_PATH = Pattern.compile("/api/configs/(\\d+)");
+    static final int DEFAULT_LIMIT = 50;
+    static final int MAX_LIMIT = 200;
 
-    private final Supplier<ConfigAdmin> admin;
+    /** Where configurations are read from and changed through. */
+    interface Source {
+        /** Every configuration, in memory, in the order they are listed. */
+        ConfigReplica replica();
+
+        /** Whether the replica has received everything at least once. */
+        boolean synced();
+
+        /** @throws ConfigurationException while archon-config cannot be reached */
+        ConfigAdmin admin();
+    }
+
+    /** One page of a list, and how many match in all. */
+    record Page(List<ConfigEntry> items, int total, int offset, int limit) {
+    }
+
+    private final Source source;
     private final Function<String, Optional<Principal>> sessions;
 
-    /**
-     * @param admin archon-config's management interface; throws {@link ConfigurationException} while unreachable
-     */
-    ConfigApi(Supplier<ConfigAdmin> admin, Function<String, Optional<Principal>> sessions) {
-        this.admin = admin;
+    ConfigApi(Source source, Function<String, Optional<Principal>> sessions) {
+        this.source = source;
         this.sessions = sessions;
     }
 
@@ -61,7 +81,7 @@ final class ConfigApi {
                     null);
         }
 
-        private static <E extends Enum<E>> E parse(Class<E> type, String value, String field) {
+        static <E extends Enum<E>> E parse(Class<E> type, String value, String field) {
             if (value == null) {
                 return null;
             }
@@ -73,6 +93,53 @@ final class ConfigApi {
         }
     }
 
+    /** Filters in one pass over the sorted entries, keeping only the page asked for. */
+    static Page page(Collection<ConfigEntry> entries, Map<String, String> parameters) {
+        String query = parameters.getOrDefault("q", "").trim().toLowerCase(Locale.ROOT);
+        ConfigLevel level = ConfigBody.parse(ConfigLevel.class, blankToNull(parameters.get("level")), "level");
+        int offset = number(parameters.get("offset"), 0, 0, Integer.MAX_VALUE);
+        int limit = number(parameters.get("limit"), DEFAULT_LIMIT, 1, MAX_LIMIT);
+        List<ConfigEntry> items = new ArrayList<>();
+        int total = 0;
+        for (ConfigEntry entry : entries) {
+            if ((level == null || entry.level() == level) && matches(entry, query)) {
+                if (total >= offset && items.size() < limit) {
+                    items.add(entry);
+                }
+                total++;
+            }
+        }
+        return new Page(items, total, offset, limit);
+    }
+
+    private static boolean matches(ConfigEntry entry, String query) {
+        if (query.isEmpty()) {
+            return true;
+        }
+        for (String field : new String[]{entry.name(), entry.group(), entry.application(), entry.value(),
+                entry.description(), entry.type().name()}) {
+            if (field != null && field.toLowerCase(Locale.ROOT).contains(query)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int number(String value, int fallback, int min, int max) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Math.max(min, Math.min(max, Integer.parseInt(value.trim())));
+        } catch (NumberFormatException e) {
+            throw new AuthException(400, "Not a number: " + value);
+        }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
     void handle(HttpExchange exchange) throws IOException {
         try {
             Principal user = Http.cookie(exchange, Http.SESSION_COOKIE).flatMap(sessions)
@@ -82,12 +149,16 @@ final class ConfigApi {
             if (path.equals("/api/configs") || path.equals("/api/configs/")) {
                 if (method.equals("GET")) {
                     AuthService.require(user, Permission.CONFIGS_VIEW);
-                    Http.sendJson(exchange, 200, admin.get().list());
+                    if (!source.synced()) {
+                        throw ConfigurationException.unavailable("Configurations are still loading", null);
+                    }
+                    Http.sendJson(exchange, 200, page(source.replica().entries(),
+                            Http.queryParameters(exchange.getRequestURI())));
                 } else if (method.equals("POST")) {
                     Http.requireSameOrigin(exchange);
                     AuthService.require(user, Permission.CONFIGS_MANAGE);
                     ConfigBody body = Http.readJson(exchange, ConfigBody.class);
-                    Http.sendJson(exchange, 201, admin.get().create(body.toEntry(0), user.username()));
+                    Http.sendJson(exchange, 201, source.admin().create(body.toEntry(0), user.username()));
                 } else {
                     Http.sendError(exchange, 405, "Method not allowed");
                 }
@@ -103,9 +174,9 @@ final class ConfigApi {
             AuthService.require(user, Permission.CONFIGS_MANAGE);
             if (method.equals("PUT")) {
                 ConfigBody body = Http.readJson(exchange, ConfigBody.class);
-                Http.sendJson(exchange, 200, admin.get().update(body.toEntry(id), user.username()));
+                Http.sendJson(exchange, 200, source.admin().update(body.toEntry(id), user.username()));
             } else if (method.equals("DELETE")) {
-                admin.get().delete(id, user.username());
+                source.admin().delete(id, user.username());
                 Http.sendNoContent(exchange);
             } else {
                 Http.sendError(exchange, 405, "Method not allowed");

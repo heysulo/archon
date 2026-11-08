@@ -5,6 +5,8 @@ import dev.heysulo.archon.dictionary.sdk.config.ConfigLevel;
 import dev.heysulo.archon.dictionary.sdk.config.ConfigType;
 import dev.heysulo.archon.dictionary.sdk.messages.ConfigChanged;
 import dev.heysulo.archon.dictionary.sdk.messages.ConfigHelloResponse;
+import dev.heysulo.archon.dictionary.sdk.messages.ConfigSnapshot;
+import dev.heysulo.archon.dictionary.sdk.services.ServiceEndpoint;
 import dev.heysulo.archon.sdk.services.ServiceClient;
 import dev.heysulo.archon.sdk.services.ServiceException;
 import dev.heysulo.archon.sdk.services.TestServiceClients;
@@ -49,8 +51,8 @@ public class ConfigClientTest {
 
     @Test
     public void keepsTheFirstConfigurationsInMemory() {
-        client.onMessage(null, ConfigHelloResponse.accepted(List.of(entry("limit", ConfigType.INTEGER, "100"),
-                entry("currency", ConfigType.STRING, "EUR"))));
+        snapshot(List.of(entry("limit", ConfigType.INTEGER, "100"),
+                entry("currency", ConfigType.STRING, "EUR")));
 
         Assert.assertTrue(client.awaitFirstSnapshot(0));
         Assert.assertEquals(client.get("limit").orElseThrow().asLong(), 100L);
@@ -61,8 +63,8 @@ public class ConfigClientTest {
 
     @Test
     public void appliesPushedChangesAndReportsEach() {
-        client.onMessage(null, ConfigHelloResponse.accepted(List.of(entry("limit", ConfigType.INTEGER, "100"),
-                entry("currency", ConfigType.STRING, "EUR"))));
+        snapshot(List.of(entry("limit", ConfigType.INTEGER, "100"),
+                entry("currency", ConfigType.STRING, "EUR")));
         heard.clear();
 
         client.onMessage(null, new ConfigChanged(List.of(entry("limit", ConfigType.INTEGER, "150")), List.of()));
@@ -76,12 +78,12 @@ public class ConfigClientTest {
     // After a reconnect everything arrives again; only what really changed meanwhile is reported
     @Test
     public void reportsOnlyRealChangesAfterAReconnect() {
-        client.onMessage(null, ConfigHelloResponse.accepted(List.of(entry("limit", ConfigType.INTEGER, "100"),
-                entry("currency", ConfigType.STRING, "EUR"))));
+        snapshot(List.of(entry("limit", ConfigType.INTEGER, "100"),
+                entry("currency", ConfigType.STRING, "EUR")));
         heard.clear();
 
-        client.onMessage(null, ConfigHelloResponse.accepted(List.of(entry("limit", ConfigType.INTEGER, "100"),
-                entry("flag", ConfigType.BOOLEAN, "true"))));
+        snapshot(List.of(entry("limit", ConfigType.INTEGER, "100"),
+                entry("flag", ConfigType.BOOLEAN, "true")));
 
         Assert.assertEquals(heard.size(), 2, heard.toString());
         Assert.assertTrue(heard.containsAll(List.of("currency:EUR->null", "flag:null->true")), heard.toString());
@@ -116,6 +118,35 @@ public class ConfigClientTest {
         connectFailure = new ServiceException("No instance of archon-config is running");
         client.start();
         Assert.assertEquals(scheduler.delays, List.of(2_000L));
+    }
+
+    // Uses the pieces only once the last one arrives
+    @Test
+    public void waitsForEveryPieceOfTheSnapshot() {
+        client.onMessage(null, ConfigHelloResponse.accepted());
+        client.onMessage(null, new ConfigSnapshot(List.of(entry("limit", ConfigType.INTEGER, "100")), false));
+        Assert.assertTrue(client.all().isEmpty());
+        Assert.assertFalse(client.awaitFirstSnapshot(0));
+
+        client.onMessage(null, new ConfigSnapshot(List.of(entry("currency", ConfigType.STRING, "EUR")), true));
+        Assert.assertEquals(client.all().size(), 2);
+        Assert.assertTrue(client.awaitFirstSnapshot(0));
+    }
+
+    // A snapshot cut short by a disconnect is dropped, not mixed into the next one
+    @Test
+    public void dropsAHalfReceivedSnapshotOnReconnect() {
+        client.onMessage(null, ConfigHelloResponse.accepted());
+        client.onMessage(null, new ConfigSnapshot(List.of(entry("stale", ConfigType.STRING, "x")), false));
+        client.onConnect(TestServiceClients.unconnected(ConfigClient.SERVICE, client),
+                new ServiceEndpoint("10.0.0.1", 9101, 1, true));
+        snapshot(List.of(entry("limit", ConfigType.INTEGER, "100")));
+        Assert.assertEquals(client.all().keySet(), java.util.Set.of("limit"));
+    }
+
+    private void snapshot(List<ConfigEntry> entries) {
+        client.onMessage(null, ConfigHelloResponse.accepted());
+        client.onMessage(null, new ConfigSnapshot(entries, true));
     }
 
     private static ConfigEntry entry(String name, ConfigType type, String value) {

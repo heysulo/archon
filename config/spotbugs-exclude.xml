@@ -43,4 +43,10 @@
         <Class name="dev.heysulo.archon.config.ConfigDatabase"/>
         <Method name="dataSource"/>
     </Match>
+    <!-- The replica client fills the store it is given; keeping it is the point -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Class name="dev.heysulo.archon.sdk.config.ConfigReplicaClient"/>
+        <Method name="&lt;init&gt;"/>
+    </Match>
 </FindBugsFilter>

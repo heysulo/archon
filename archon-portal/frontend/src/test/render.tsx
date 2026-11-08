@@ -50,7 +50,9 @@ export function mockPortal(routes: Record<string, { status?: number; body?: unkn
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
       headers: (init?.headers ?? {}) as Record<string, string>,
     });
-    const route = routes[`${method} ${path}`] ?? { status: 404, body: { error: "Not found" } };
+    // An exact match first, then the path without its query string
+    const route = routes[`${method} ${path}`] ?? routes[`${method} ${path.split("?")[0]}`] ??
+      { status: 404, body: { error: "Not found" } };
     const status = route.status ?? 200;
     return new Response(status === 204 ? null : JSON.stringify(route.body ?? {}), { status });
   }) as typeof fetch;

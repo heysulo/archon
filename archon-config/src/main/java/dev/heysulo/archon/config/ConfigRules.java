@@ -4,9 +4,7 @@ import dev.heysulo.archon.dictionary.sdk.config.ConfigEntry;
 import dev.heysulo.archon.dictionary.sdk.config.ConfigLevel;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Pattern;
 
 /** Who sees which configurations, and what a valid configuration looks like. */
@@ -15,30 +13,6 @@ final class ConfigRules {
     private static final int MAX_DESCRIPTION = 512;
 
     private ConfigRules() {
-    }
-
-    static boolean visibleTo(ConfigEntry entry, String group, String application) {
-        return switch (entry.level()) {
-            case GLOBAL -> true;
-            case GROUP -> entry.group().equals(group);
-            case APPLICATION -> entry.group().equals(group) && entry.application().equals(application);
-        };
-    }
-
-    /**
-     * What an application sees: one configuration per name, the most specific of those visible to it. An
-     * application's own value overrides its group's, which overrides the global one.
-     */
-    static Map<String, ConfigEntry> resolve(Collection<ConfigEntry> all, String group, String application) {
-        Map<String, ConfigEntry> resolved = new HashMap<>();
-        for (ConfigEntry entry : all) {
-            if (!visibleTo(entry, group, application)) {
-                continue;
-            }
-            resolved.merge(entry.name(), entry, (current, candidate) ->
-                    candidate.level().specificity() > current.level().specificity() ? candidate : current);
-        }
-        return resolved;
     }
 
     /**

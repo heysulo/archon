@@ -38,11 +38,3 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export function identifierError(value: string): string | null {
   return IDENTIFIER.test(value.trim()) ? null : "Letters, digits, dots, dashes or underscores";
 }
-
-/** Case-insensitive match against everything a row shows. */
-export function matches(config: Config, query: string): boolean {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  return [config.name, config.group, config.application, config.value, config.description, config.type]
-    .some((field) => field?.toLowerCase().includes(needle));
-}

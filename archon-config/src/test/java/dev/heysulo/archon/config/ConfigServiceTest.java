@@ -2,6 +2,9 @@ package dev.heysulo.archon.config;
 
 import dev.heysulo.archon.dictionary.sdk.config.ConfigEntry;
 import dev.heysulo.archon.dictionary.sdk.messages.ConfigChanged;
+import dev.heysulo.archon.dictionary.sdk.messages.ConfigRows;
+import dev.heysulo.archon.dictionary.sdk.messages.ConfigSnapshot;
+import dev.heysulo.databridge.core.common.Message;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -150,9 +153,106 @@ public class ConfigServiceTest {
         Assert.assertNotNull(again);
     }
 
+    @Test
+    public void addsTheRevisionIndex() throws Exception {
+        Assert.assertTrue(database.hasIndex(ConfigDatabase.REVISION_INDEX));
+    }
+
+    // A more specific configuration hides changes to less specific ones with the same name
+    @Test
+    public void pushesNothingWhenAMoreSpecificConfigurationHidesTheChange() {
+        ConfigEntry global = service.create(entry(GLOBAL, "", "", "timeout", INTEGER, "30", false), "admin");
+        service.create(entry(APPLICATION, "Shop", "Cart", "timeout", INTEGER, "10", false), "admin");
+        List<ConfigChanged> toCart = subscribe("Shop", "Cart");
+        List<ConfigChanged> toCheckout = subscribe("Shop", "Checkout");
+
+        service.update(global.withValue("40"), "admin");
+
+        Assert.assertTrue(toCart.isEmpty(), toCart.toString());
+        Assert.assertEquals(toCheckout.get(0).getChanged().get(0).value(), "40");
+    }
+
+    @Test
+    public void sendsTheSnapshotInPieces() throws Exception {
+        ConfigService small = new ConfigService(database.store(), Clock.systemUTC(), 2_000);
+        for (int i = 0; i < 20; i++) {
+            small.create(entry(GLOBAL, "", "", "name" + i, STRING, "x".repeat(200), false), "admin");
+        }
+        List<Message> pushed = new CopyOnWriteArrayList<>();
+        small.subscribe(new ConfigService.Subscriber("Shop", "Cart", pushed::add));
+
+        Assert.assertTrue(pushed.size() > 1, "split into " + pushed.size());
+        Assert.assertEquals(pushed.stream().filter(m -> ((ConfigSnapshot) m).isLast()).count(), 1);
+        Assert.assertTrue(((ConfigSnapshot) pushed.get(pushed.size() - 1)).isLast());
+        Assert.assertEquals(pushed.stream().mapToInt(m -> ((ConfigSnapshot) m).getEntries().size()).sum(), 20);
+    }
+
+    // ---------------- replicas ----------------
+
+    @Test
+    public void sendsANewReplicaEverythingThenEachChange() {
+        ConfigEntry kept = service.create(entry(GLOBAL, "", "", "kept", STRING, "x", false), "admin");
+        ConfigEntry gone = service.create(entry(GLOBAL, "", "", "gone", STRING, "x", false), "admin");
+        service.delete(gone.id(), "admin");
+
+        List<Message> pushed = replicate(0);
+        ConfigRows all = (ConfigRows) pushed.get(0);
+        Assert.assertTrue(all.isReset() && all.isLast());
+        Assert.assertEquals(all.getRows().stream().map(row -> row.entry().name()).toList(), List.of("kept"));
+        Assert.assertEquals(all.getRevision(), service.revision());
+
+        service.update(kept.withValue("y"), "admin");
+        ConfigRows change = (ConfigRows) pushed.get(1);
+        Assert.assertFalse(change.isReset());
+        Assert.assertEquals(change.getRows().get(0).entry().value(), "y");
+        Assert.assertEquals(change.getRevision(), service.revision());
+    }
+
+    @Test
+    public void sendsAReturningReplicaOnlyWhatItMissedDeletionsIncluded() {
+        ConfigEntry first = service.create(entry(GLOBAL, "", "", "first", STRING, "x", false), "admin");
+        long seen = service.revision();
+        service.create(entry(GLOBAL, "", "", "second", STRING, "x", false), "admin");
+        service.delete(first.id(), "admin");
+
+        ConfigRows missed = (ConfigRows) replicate(seen).get(0);
+        Assert.assertFalse(missed.isReset());
+        Assert.assertEquals(missed.getRows().stream().map(row -> row.entry().name() + ":" + row.deleted()).toList(),
+                List.of("second:false", "first:true"));
+    }
+
+    // The database was replaced: the replica's revision means nothing here, so it starts over
+    @Test
+    public void startsAReplicaOverWhenItIsAhead() {
+        service.create(entry(GLOBAL, "", "", "only", STRING, "x", false), "admin");
+        ConfigRows all = (ConfigRows) replicate(service.revision() + 100).get(0);
+        Assert.assertTrue(all.isReset());
+        Assert.assertEquals(all.getRows().size(), 1);
+    }
+
+    // A mirror applies the primary's rows through the same service, ready to take over
+    @Test
+    public void mirrorsApplyThePrimarysRows() {
+        ConfigService mirror = new ConfigService(database.store(), Clock.systemUTC());
+        service.subscribeReplica(new ConfigService.Replica(message -> {
+            ConfigRows rows = (ConfigRows) message;
+            if (rows.isReset()) {
+                mirror.replace(rows.getRows(), rows.getRevision());
+            } else {
+                mirror.apply(rows.getRows(), rows.getRevision());
+            }
+        }), mirror.revision());
+
+        ConfigEntry created = service.create(entry(GROUP, "Shop", "", "currency", STRING, "EUR", false), "admin");
+        service.update(created.withValue("USD"), "admin");
+
+        Assert.assertEquals(mirror.revision(), service.revision());
+        Assert.assertEquals(mirror.visibleTo("Shop", "Cart").get(0).value(), "USD");
+    }
+
     // Two replicas share the database. A change made through one reaches the other's callers on its next refresh.
     @Test
-    public void picksUpChangesMadeByAnotherReplica() {
+    public void picksUpChangesMadeByAnotherServer() {
         ConfigService other = new ConfigService(database.store(), Clock.systemUTC());
         List<ConfigChanged> pushed = subscribe("Shop", "Cart");
         other.create(entry(GROUP, "Shop", "", "currency", STRING, "EUR", false), "admin");
@@ -163,12 +263,22 @@ public class ConfigServiceTest {
 
     private List<ConfigChanged> subscribe(String group, String application) {
         List<ConfigChanged> pushed = new CopyOnWriteArrayList<>();
-        service.subscribe(new ConfigService.Subscriber(group, application, pushed::add));
+        service.subscribe(new ConfigService.Subscriber(group, application, message -> {
+            if (message instanceof ConfigChanged changed) {
+                pushed.add(changed);
+            }
+        }));
+        return pushed;
+    }
+
+    private List<Message> replicate(long since) {
+        List<Message> pushed = new CopyOnWriteArrayList<>();
+        service.subscribeReplica(new ConfigService.Replica(pushed::add), since);
         return pushed;
     }
 
     private Map<String, ConfigEntry> seen(String group, String application) {
-        return service.subscribe(new ConfigService.Subscriber(group, application, changed -> { }))
-                .stream().collect(Collectors.toMap(ConfigEntry::name, Function.identity()));
+        return service.visibleTo(group, application).stream()
+                .collect(Collectors.toMap(ConfigEntry::name, Function.identity()));
     }
 }

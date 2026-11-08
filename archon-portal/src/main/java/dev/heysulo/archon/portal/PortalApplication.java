@@ -46,9 +46,9 @@ public final class PortalApplication {
 
         PortalIdentity identity = new PortalIdentity();
         RegistryWatcher registry = new RegistryWatcher();
+        PortalConfigs configs = new PortalConfigs();
         PortalServer server = new PortalServer(registry, snapshot -> snapshot.servedBy(identity), "/portal",
-                new AuthApi(auth), new ConfigApi(() -> ArchonInterface.getInstance().configAdmin(), auth::authenticate),
-                auth::authenticate);
+                new AuthApi(auth), new ConfigApi(configs, auth::authenticate), auth::authenticate);
         // Serving first: the page reports registry trouble itself, and registering waits until a primary answers
         server.start(port);
         registry.start();
@@ -56,7 +56,7 @@ public final class PortalApplication {
             server.stop();
             database.close();
         }, "portal-shutdown"));
-        Thread registration = new Thread(() -> register(identity), "portal-registration");
+        Thread registration = new Thread(() -> register(identity, configs), "portal-registration");
         registration.setDaemon(true);
         registration.start();
         LOGGER.info("Archon portal started on {}", identity.getHost());
@@ -84,10 +84,12 @@ public final class PortalApplication {
         }, CLEAN_UP_MINUTES, CLEAN_UP_MINUTES, TimeUnit.MINUTES);
     }
 
-    private static void register(PortalIdentity identity) {
+    private static void register(PortalIdentity identity, PortalConfigs configs) {
         try {
-            int rank = ArchonInterface.getInstance().initialize(PortalIdentity.GROUP, PortalIdentity.NAME, identity);
+            ArchonInterface archon = ArchonInterface.getInstance();
+            int rank = archon.initialize(PortalIdentity.GROUP, PortalIdentity.NAME, identity);
             LOGGER.info("Registered as {} / {} with rank {}", PortalIdentity.GROUP, PortalIdentity.NAME, rank);
+            configs.start(archon.replicateConfigs(configs.store()));
         } catch (RuntimeException e) {
             // Without a rank the replica still serves; exiting lets the orchestrator start a fresh one to retry
             LOGGER.error("Could not register the portal: {}. Exiting", e.getMessage());

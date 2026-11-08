@@ -3,7 +3,8 @@ package dev.heysulo.archon.sdk;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
 import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
-import dev.heysulo.archon.sdk.config.ConfigAdmin;
+import dev.heysulo.archon.sdk.config.ConfigReplicaClient;
+import dev.heysulo.archon.sdk.config.ConfigRowSink;
 import dev.heysulo.archon.sdk.config.ConfigClient;
 import dev.heysulo.archon.sdk.config.ConfigValue;
 import dev.heysulo.archon.sdk.config.ConfigurationException;
@@ -98,16 +99,14 @@ public class ArchonInterface {
         primaryRegistry.connect(primaryRegistryLocation);
     }
 
-    // archon-config itself does not read configurations through itself
+    // archon-config and the portal hold every configuration through replicateConfigs instead
     private void startConfigs(String group, String name) {
-        if ("Archon".equals(group) && "Config".equals(name)) {
+        if ("Archon".equals(group) && ("Config".equals(name) || "Portal".equals(name))) {
             return;
         }
         configs = new ConfigClient(group, name, () -> rank,
-                () -> primaryRegistry.getAuthenticationToken(),
-                (serviceId, serviceCallback) -> services.connect(serviceId, serviceCallback,
-                        dev.heysulo.archon.sdk.services.ServiceClientOptions.defaults()),
-                events::configChanged, reconnectThread);
+                () -> primaryRegistry.getAuthenticationToken(), this::connectToConfigs, events::configChanged,
+                reconnectThread);
         configs.start();
         if (!configs.awaitFirstSnapshot(FIRST_CONFIG_WAIT_MILLIS)) {
             LOGGER.info("Starting without configurations for now; they are applied when archon-config answers");
@@ -165,9 +164,22 @@ public class ArchonInterface {
         return requireConfigs().set(name, value);
     }
 
-    /** Manages every configuration. archon-config allows this only to Archon / Portal. */
-    public ConfigAdmin configAdmin() {
-        return requireConfigs();
+    /**
+     * Starts holding every stored configuration in {@code sink}, kept up to date by archon-config's primary. Only
+     * Archon's portal and archon-config's own mirrors are allowed. Close the returned client to stop.
+     */
+    public ConfigReplicaClient replicateConfigs(ConfigRowSink sink) {
+        if (primaryRegistry == null) {
+            throw new IllegalStateException("Initialize first");
+        }
+        ConfigReplicaClient replica = new ConfigReplicaClient(groupName, applicationName, () -> rank,
+                () -> primaryRegistry.getAuthenticationToken(), this::connectToConfigs, sink, reconnectThread);
+        replica.start();
+        return replica;
+    }
+
+    private ServiceClient connectToConfigs(String serviceId, ServiceClientCallback callback) {
+        return services.connect(serviceId, callback, ServiceClientOptions.defaults());
     }
 
     private ConfigClient requireConfigs() {

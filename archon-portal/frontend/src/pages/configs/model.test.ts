@@ -1,5 +1,5 @@
 import type { Config } from "./configsApi";
-import { matches, scopeOf, valueError } from "./model";
+import { scopeOf, valueError } from "./model";
 
 const config: Config = { id: 1, level: "APPLICATION", group: "Group", application: "Application",
   name: "ping.intervalMillis", type: "INTEGER", value: "1000", readOnly: false, description: "How often to ping" };
@@ -18,12 +18,5 @@ describe("configs model", () => {
     expect(valueError("DECIMAL", "")).toBe("A number");
     expect(valueError("BOOLEAN", "yes")).toBe("true or false");
     expect(valueError("STRING", "")).toBeNull();
-  });
-
-  it("searches names, scopes, values and descriptions", () => {
-    expect(matches(config, "interval")).toBe(true);
-    expect(matches(config, "application")).toBe(true);
-    expect(matches(config, "how often")).toBe(true);
-    expect(matches(config, "timeout")).toBe(false);
   });
 });

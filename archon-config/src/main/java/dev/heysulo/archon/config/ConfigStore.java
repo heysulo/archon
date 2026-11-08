@@ -1,6 +1,7 @@
 package dev.heysulo.archon.config;
 
 import dev.heysulo.archon.dictionary.sdk.config.ConfigEntry;
+import dev.heysulo.archon.dictionary.sdk.config.ConfigRow;
 import dev.heysulo.archon.dictionary.sdk.config.ConfigLevel;
 import dev.heysulo.archon.dictionary.sdk.config.ConfigType;
 
@@ -32,13 +33,13 @@ final class ConfigStore {
     }
 
     /** Every configuration changed after the revision, oldest first, deleted ones included. */
-    List<StoredConfig> changedSince(long revision) {
+    List<ConfigRow> changedSince(long revision) {
         try (Connection connection = dataSource.getConnection();
              PreparedStatement select = connection.prepareStatement(
                      "SELECT " + COLUMNS + " FROM configurations WHERE revision > ? ORDER BY revision")) {
             select.setLong(1, revision);
             try (ResultSet result = select.executeQuery()) {
-                List<StoredConfig> changed = new ArrayList<>();
+                List<ConfigRow> changed = new ArrayList<>();
                 while (result.next()) {
                     changed.add(read(result));
                 }
@@ -57,7 +58,7 @@ final class ConfigStore {
     ConfigEntry create(ConfigEntry entry, String actor, Instant now) {
         return transaction(connection -> {
             long revision = nextRevision(connection);
-            Optional<StoredConfig> existing = findByIdentifier(connection, entry);
+            Optional<ConfigRow> existing = findByIdentifier(connection, entry);
             if (existing.isPresent() && !existing.get().deleted()) {
                 throw new ConfigException("A configuration with this level, group, application and name exists");
             }
@@ -160,7 +161,7 @@ final class ConfigStore {
         }
     }
 
-    private static Optional<StoredConfig> findById(Connection connection, long id) throws SQLException {
+    private static Optional<ConfigRow> findById(Connection connection, long id) throws SQLException {
         try (PreparedStatement select = connection.prepareStatement(
                 "SELECT " + COLUMNS + " FROM configurations WHERE id = ?")) {
             select.setLong(1, id);
@@ -170,7 +171,7 @@ final class ConfigStore {
         }
     }
 
-    private static Optional<StoredConfig> findByIdentifier(Connection connection, ConfigEntry entry)
+    private static Optional<ConfigRow> findByIdentifier(Connection connection, ConfigEntry entry)
             throws SQLException {
         try (PreparedStatement select = connection.prepareStatement("SELECT " + COLUMNS + " FROM configurations "
                 + "WHERE level = ? AND app_group = ? AND app_name = ? AND name = ?")) {
@@ -184,14 +185,14 @@ final class ConfigStore {
         }
     }
 
-    private static StoredConfig read(ResultSet result) throws SQLException {
+    private static ConfigRow read(ResultSet result) throws SQLException {
         LocalDateTime updatedAt = result.getObject("updated_at", LocalDateTime.class);
         ConfigEntry entry = new ConfigEntry(result.getLong("id"), ConfigLevel.valueOf(result.getString("level")),
                 result.getString("app_group"), result.getString("app_name"), result.getString("name"),
                 ConfigType.valueOf(result.getString("value_type")), result.getString("config_value"),
                 result.getBoolean("read_only"), result.getString("description"),
                 updatedAt.toInstant(ZoneOffset.UTC).toString(), result.getString("updated_by"));
-        return new StoredConfig(entry, result.getBoolean("deleted"), result.getLong("revision"));
+        return new ConfigRow(entry, result.getBoolean("deleted"), result.getLong("revision"));
     }
 
     @FunctionalInterface

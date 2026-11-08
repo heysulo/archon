@@ -1,31 +1,43 @@
-import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, SegmentedControl, Stack,
-  Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, Pagination,
+  SegmentedControl, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconDots, IconLock, IconPencil, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
 import { ConfigFormModal } from "./ConfigFormModal";
 import { useConfigMutations, useConfigs, type Config, type ConfigInput, type ConfigLevel } from "./configsApi";
-import { LEVEL_LABELS, matches, scopeOf } from "./model";
+import { LEVEL_LABELS, scopeOf } from "./model";
+
+const PAGE_SIZE = 50;
+// Long enough to wait for the next keystroke, short enough to feel immediate
+const SEARCH_DELAY_MS = 250;
 
 const LEVEL_COLORS: Record<ConfigLevel, string> = { GLOBAL: "indigo", GROUP: "teal", APPLICATION: "orange" };
 
 export function ConfigsPage() {
   const { can } = useAuth();
   const manage = can(PERMISSIONS.configsManage);
-  const configs = useConfigs();
   const { create, update, remove } = useConfigMutations();
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<"ALL" | ConfigLevel>("ALL");
+  const [page, setPage] = useState(1);
+  const [debouncedQuery] = useDebouncedValue(query, SEARCH_DELAY_MS);
+  const configs = useConfigs({
+    query: debouncedQuery,
+    level: level === "ALL" ? null : level,
+    page,
+    pageSize: PAGE_SIZE,
+  });
   // undefined: closed; null: adding; a configuration: editing it
   const [editing, setEditing] = useState<Config | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<Config | null>(null);
 
-  const shown = useMemo(
-    () => (configs.data ?? []).filter((config) => (level === "ALL" || config.level === level) && matches(config, query)),
-    [configs.data, level, query],
-  );
+  const shown = configs.data?.items ?? [];
+  const total = configs.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const firstShown = (page - 1) * PAGE_SIZE + 1;
 
   const save = async (input: ConfigInput) => {
     if (editing === null) {
@@ -70,12 +82,18 @@ export function ConfigsPage() {
           placeholder="Search by name, group, application, value or description"
           leftSection={<IconSearch size={16} />}
           value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value);
+            setPage(1);
+          }}
           aria-label="Search configurations"
         />
         <SegmentedControl
           value={level}
-          onChange={(value) => setLevel(value as "ALL" | ConfigLevel)}
+          onChange={(value) => {
+            setLevel(value as "ALL" | ConfigLevel);
+            setPage(1);
+          }}
           data={[{ value: "ALL", label: "All" }, ...(Object.keys(LEVEL_LABELS) as ConfigLevel[]).map((value) => ({
             value,
             label: LEVEL_LABELS[value],
@@ -95,7 +113,7 @@ export function ConfigsPage() {
         </Center>
       ) : shown.length === 0 ? (
         <Center py="xl">
-          <Text c="dimmed">{query || level !== "ALL" ? "No configurations match" : "No configurations yet"}</Text>
+          <Text c="dimmed">{debouncedQuery || level !== "ALL" ? "No configurations match" : "No configurations yet"}</Text>
         </Center>
       ) : (
         <Card withBorder padding={0} radius="md">
@@ -178,6 +196,16 @@ export function ConfigsPage() {
             </Table>
           </div>
         </Card>
+      )}
+
+      {total > 0 && (
+        <Group justify="space-between">
+          <Text size="sm" c="dimmed">
+            {firstShown.toLocaleString()}–{(firstShown + shown.length - 1).toLocaleString()} of{" "}
+            {total.toLocaleString()}
+          </Text>
+          {pages > 1 && <Pagination total={pages} value={page} onChange={setPage} size="sm" />}
+        </Group>
       )}
 
       <ConfigFormModal opened={editing !== undefined} config={editing ?? null} onClose={() => setEditing(undefined)}

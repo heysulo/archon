@@ -13,8 +13,6 @@ public class ConfigRequest implements Message {
     public enum Operation {
         /** Changes the value of a configuration the caller sees, unless it is read only. */
         SET,
-        /** Every configuration at every level. Portal only. */
-        LIST_ALL,
         CREATE,
         UPDATE,
         DELETE

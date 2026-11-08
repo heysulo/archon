@@ -119,6 +119,23 @@ final class Http {
         }
     }
 
+    /** The query string's parameters, decoded; the first wins when one is repeated. */
+    static java.util.Map<String, String> queryParameters(URI uri) {
+        java.util.Map<String, String> parameters = new java.util.HashMap<>();
+        String query = uri.getRawQuery();
+        if (query == null || query.isEmpty()) {
+            return parameters;
+        }
+        for (String pair : query.split("&")) {
+            String[] parts = pair.split("=", 2);
+            String key = java.net.URLDecoder.decode(parts[0], java.nio.charset.StandardCharsets.UTF_8);
+            String value = parts.length == 2
+                    ? java.net.URLDecoder.decode(parts[1], java.nio.charset.StandardCharsets.UTF_8) : "";
+            parameters.putIfAbsent(key, value);
+        }
+        return parameters;
+    }
+
     static Optional<String> cookie(HttpExchange exchange, String name) {
         for (String header : exchange.getRequestHeaders().getOrDefault("Cookie", java.util.List.of())) {
             for (String part : header.split(";")) {

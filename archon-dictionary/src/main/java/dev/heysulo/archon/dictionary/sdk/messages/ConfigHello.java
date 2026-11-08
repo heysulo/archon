@@ -13,12 +13,27 @@ public class ConfigHello implements Message {
     private final String name;
     private final int rank;
     private final String authenticationToken;
+    private final boolean everything;
+    private final long sinceRevision;
 
+    /** An application: it receives what it sees, most specific per name, then every change to that. */
     public ConfigHello(String group, String name, int rank, String authenticationToken) {
+        this(group, name, rank, authenticationToken, false, 0);
+    }
+
+    /**
+     * @param everything    a replica, only archon-config's mirrors and the portal: it receives every stored row, then
+     *                      every change
+     * @param sinceRevision for a replica, the last revision it has, so it receives only what it missed; 0 for all
+     */
+    public ConfigHello(String group, String name, int rank, String authenticationToken, boolean everything,
+            long sinceRevision) {
         this.group = group;
         this.name = name;
         this.rank = rank;
         this.authenticationToken = authenticationToken;
+        this.everything = everything;
+        this.sinceRevision = sinceRevision;
     }
 
     public String getGroup() {
@@ -35,5 +50,13 @@ public class ConfigHello implements Message {
 
     public String getAuthenticationToken() {
         return authenticationToken;
+    }
+
+    public boolean isEverything() {
+        return everything;
+    }
+
+    public long getSinceRevision() {
+        return sinceRevision;
     }
 }

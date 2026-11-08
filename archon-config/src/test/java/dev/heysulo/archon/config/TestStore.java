@@ -39,6 +39,19 @@ final class TestStore implements AutoCloseable {
         }
     }
 
+    boolean hasIndex(String name) throws SQLException {
+        try (Connection connection = database.dataSource().getConnection();
+             var indexes = connection.getMetaData().getIndexInfo(connection.getCatalog(), connection.getSchema(),
+                     "configurations", false, true)) {
+            while (indexes.next()) {
+                if (name.equalsIgnoreCase(indexes.getString("INDEX_NAME"))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     static ConfigEntry entry(ConfigLevel level, String group, String application, String name, ConfigType type,
             String value, boolean readOnly) {
         return new ConfigEntry(0, level, group, application, name, type, value, readOnly, "", null, null);

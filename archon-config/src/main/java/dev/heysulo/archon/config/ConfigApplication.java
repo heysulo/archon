@@ -3,6 +3,7 @@ package dev.heysulo.archon.config;
 import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.sdk.ArchonCallback;
 import dev.heysulo.archon.sdk.ArchonInterface;
+import dev.heysulo.archon.sdk.config.ConfigReplicaClient;
 import dev.heysulo.archon.sdk.services.ServiceException;
 import dev.heysulo.databridge.core.server.Server;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -30,10 +31,13 @@ public final class ConfigApplication implements ArchonCallback {
     static final String SERVICE = "archon-config";
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigApplication.class);
     // Picks up changes other replicas or people made directly in the database
-    private static final Duration REFRESH_INTERVAL = Duration.ofSeconds(2);
+    // A safety net only: the primary reads back each change as it makes it, and mirrors are pushed every change.
+    // This catches writes from anywhere else, such as a primary that was cut off but kept writing.
+    private static final Duration REFRESH_INTERVAL = Duration.ofSeconds(30);
     private static final long RETRY_MILLIS = 2_000;
 
     private final ArchonInterface archon = ArchonInterface.getInstance();
+    private final ConfigService service;
     private final ConfigServer handler;
     // Rank changes start and stop the service one at a time
     private final ScheduledExecutorService roles = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -43,10 +47,12 @@ public final class ConfigApplication implements ArchonCallback {
     });
     private volatile int rank = RegistryProtocol.RANK_UNKNOWN;
     private Server server;
+    private ConfigReplicaClient replication;
     // The reason last logged for not serving, so a long wait logs once instead of every retry
     private String waitingFor;
 
-    private ConfigApplication(ConfigServer handler) {
+    private ConfigApplication(ConfigService service, ConfigServer handler) {
+        this.service = service;
         this.handler = handler;
     }
 
@@ -68,7 +74,7 @@ public final class ConfigApplication implements ArchonCallback {
         }, REFRESH_INTERVAL.toMillis(), REFRESH_INTERVAL.toMillis(), TimeUnit.MILLISECONDS);
 
         ExecutorService workers = Executors.newFixedThreadPool(4, new DefaultThreadFactory("config-worker", true));
-        ConfigApplication application = new ConfigApplication(new ConfigServer(service, new RegistryVerifier(),
+        ConfigApplication application = new ConfigApplication(service, new ConfigServer(service, new RegistryVerifier(),
                 workers));
         Runtime.getRuntime().addShutdownHook(new Thread(database::close, "config-shutdown"));
         application.start();
@@ -91,20 +97,34 @@ public final class ConfigApplication implements ArchonCallback {
     }
 
     // Runs on the role thread
+    private void stopReplicating() {
+        if (replication != null) {
+            replication.close();
+            replication = null;
+        }
+    }
+
+    // Runs on the role thread
     private void applyRole() {
         try {
             if (rank == RegistryProtocol.RANK_PRIMARY) {
                 if (server == null) {
+                    stopReplicating();
+                    // Whatever the old primary wrote but never pushed is in the database
+                    service.refresh();
                     server = archon.createService(SERVICE, handler);
                     waitingFor = null;
                     LOGGER.info("--------------- PRIMARY: serving {} ---------------", SERVICE);
                 }
-            } else if (server != null) {
-                archon.stopService(SERVICE);
-                server = null;
-                LOGGER.info("--------------- MIRROR: standing by ---------------");
             } else {
-                LOGGER.info("--------------- MIRROR: standing by ---------------");
+                if (server != null) {
+                    archon.stopService(SERVICE);
+                    server = null;
+                }
+                if (replication == null) {
+                    replication = archon.replicateConfigs(service);
+                    LOGGER.info("--------------- MIRROR: replicating from the primary ---------------");
+                }
             }
         } catch (ServiceException e) {
             // The registry may not know the service yet, or the port is still in use after a failover
