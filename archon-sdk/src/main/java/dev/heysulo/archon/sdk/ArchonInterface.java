@@ -3,6 +3,10 @@ package dev.heysulo.archon.sdk;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
 import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
+import dev.heysulo.archon.sdk.config.ConfigAdmin;
+import dev.heysulo.archon.sdk.config.ConfigClient;
+import dev.heysulo.archon.sdk.config.ConfigValue;
+import dev.heysulo.archon.sdk.config.ConfigurationException;
 import dev.heysulo.archon.sdk.exception.PrimaryRegistryCommunicationFailure;
 import dev.heysulo.archon.sdk.registry.PrimaryRegistry;
 import dev.heysulo.archon.sdk.registry.RegistryLookupService;
@@ -45,6 +49,9 @@ public class ArchonInterface {
     private volatile RegistryEvents events;
     private volatile Reconnector reconnector;
     private volatile boolean terminated;
+    private volatile ConfigClient configs;
+    // How long initialize waits for the first configurations when archon-config is running
+    private static final long FIRST_CONFIG_WAIT_MILLIS = 5_000;
     // Rank and termination callbacks, one at a time and in order, never on a network thread
     private final ScheduledExecutorService callbackThread =
             Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("archon-callbacks", true));
@@ -75,6 +82,7 @@ public class ArchonInterface {
                 () -> primaryRegistry.isConnected(), reconnectThread, PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
         setupPrimaryRegistryConnection();
         registerApplication();
+        startConfigs(groupName, applicationName);
         return rank;
     }
 
@@ -88,6 +96,85 @@ public class ArchonInterface {
         LOGGER.info("Creating primary registry connection with {}", primaryRegistryLocation);
         primaryRegistry = PrimaryRegistry.getInstance(this);
         primaryRegistry.connect(primaryRegistryLocation);
+    }
+
+    // archon-config itself does not read configurations through itself
+    private void startConfigs(String group, String name) {
+        if ("Archon".equals(group) && "Config".equals(name)) {
+            return;
+        }
+        configs = new ConfigClient(group, name, () -> rank,
+                () -> primaryRegistry.getAuthenticationToken(),
+                (serviceId, serviceCallback) -> services.connect(serviceId, serviceCallback,
+                        dev.heysulo.archon.sdk.services.ServiceClientOptions.defaults()),
+                events::configChanged, reconnectThread);
+        configs.start();
+        if (!configs.awaitFirstSnapshot(FIRST_CONFIG_WAIT_MILLIS)) {
+            LOGGER.info("Starting without configurations for now; they are applied when archon-config answers");
+        }
+    }
+
+    /** The configuration with this name as this instance sees it, from the in-memory cache. */
+    public java.util.Optional<ConfigValue> getConfig(String name) {
+        return configs == null ? java.util.Optional.empty() : configs.get(name);
+    }
+
+    public java.util.Map<String, ConfigValue> getConfigs() {
+        return configs == null ? java.util.Map.of() : configs.all();
+    }
+
+    public String getConfigString(String name, String fallback) {
+        return getConfig(name).map(ConfigValue::asString).orElse(fallback);
+    }
+
+    public long getConfigLong(String name, long fallback) {
+        try {
+            return getConfig(name).map(ConfigValue::asLong).orElse(fallback);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    public int getConfigInt(String name, int fallback) {
+        try {
+            return getConfig(name).map(ConfigValue::asInt).orElse(fallback);
+        } catch (NumberFormatException | ArithmeticException e) {
+            return fallback;
+        }
+    }
+
+    public double getConfigDouble(String name, double fallback) {
+        try {
+            return getConfig(name).map(ConfigValue::asDouble).orElse(fallback);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    public boolean getConfigBoolean(String name, boolean fallback) {
+        return getConfig(name).map(ConfigValue::asBoolean).orElse(fallback);
+    }
+
+    /**
+     * Changes the value this instance sees for a configuration. Blocks until archon-config answers.
+     *
+     * @throws ConfigurationException if unknown, read only, of the wrong type, or
+     *                                                              archon-config is unreachable
+     */
+    public ConfigValue setConfig(String name, String value) {
+        return requireConfigs().set(name, value);
+    }
+
+    /** Manages every configuration. archon-config allows this only to Archon / Portal. */
+    public ConfigAdmin configAdmin() {
+        return requireConfigs();
+    }
+
+    private ConfigClient requireConfigs() {
+        if (configs == null) {
+            throw ConfigurationException.unavailable("Configurations are not available", null);
+        }
+        return configs;
     }
 
     /** Called on a network thread when the registry connection drops. Reconnecting happens elsewhere. */

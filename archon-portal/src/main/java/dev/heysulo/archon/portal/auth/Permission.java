@@ -9,7 +9,9 @@ import java.util.Optional;
  */
 public enum Permission {
     PROCESSES_VIEW("processes:view", "See running processes"),
-    USERS_MANAGE("users:manage", "Create, change and delete users and assign roles");
+    USERS_MANAGE("users:manage", "Create, change and delete users and assign roles"),
+    CONFIGS_VIEW("configs:view", "See configurations"),
+    CONFIGS_MANAGE("configs:manage", "Create, change and delete configurations");
 
     /** Grants every permission. */
     public static final String ALL = "*";

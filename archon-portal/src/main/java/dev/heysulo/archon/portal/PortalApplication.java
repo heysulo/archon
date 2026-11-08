@@ -47,7 +47,8 @@ public final class PortalApplication {
         PortalIdentity identity = new PortalIdentity();
         RegistryWatcher registry = new RegistryWatcher();
         PortalServer server = new PortalServer(registry, snapshot -> snapshot.servedBy(identity), "/portal",
-                new AuthApi(auth), auth::authenticate);
+                new AuthApi(auth), new ConfigApi(() -> ArchonInterface.getInstance().configAdmin(), auth::authenticate),
+                auth::authenticate);
         // Serving first: the page reports registry trouble itself, and registering waits until a primary answers
         server.start(port);
         registry.start();

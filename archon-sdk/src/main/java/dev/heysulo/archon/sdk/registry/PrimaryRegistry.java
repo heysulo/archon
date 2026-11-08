@@ -84,6 +84,11 @@ public class PrimaryRegistry implements ClientCallback {
         archonInterface.onRegistryConnectionLost();
     }
 
+    /** The token the registry issued at registration, which proves this instance's identity to other components. */
+    public String getAuthenticationToken() {
+        return authenticationToken;
+    }
+
     public boolean isConnected() {
         return connected;
     }

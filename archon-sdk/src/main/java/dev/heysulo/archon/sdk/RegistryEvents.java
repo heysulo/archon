@@ -1,5 +1,6 @@
 package dev.heysulo.archon.sdk;
 
+import dev.heysulo.archon.sdk.config.ConfigValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +39,17 @@ final class RegistryEvents {
                 LOGGER.error("Rank callback failed for rank {}", rank, e);
             }
             acknowledge.accept(rank);
+        });
+    }
+
+    void configChanged(String name, ConfigValue oldValue,
+            ConfigValue newValue) {
+        executor.execute(() -> {
+            try {
+                callback.onConfigUpdated(name, oldValue, newValue);
+            } catch (RuntimeException e) {
+                LOGGER.error("Configuration callback failed for {}", name, e);
+            }
         });
     }
 

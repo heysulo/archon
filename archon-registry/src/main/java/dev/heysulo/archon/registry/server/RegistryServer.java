@@ -8,6 +8,8 @@ import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseM
 import dev.heysulo.archon.dictionary.sdk.messages.ProcessListRequest;
 import dev.heysulo.archon.dictionary.sdk.messages.ProcessListResponse;
 import dev.heysulo.archon.dictionary.sdk.messages.ProcessWatchRequest;
+import dev.heysulo.archon.dictionary.sdk.messages.VerifyInstanceRequest;
+import dev.heysulo.archon.dictionary.sdk.messages.VerifyInstanceResponse;
 import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 import dev.heysulo.archon.dictionary.sdk.services.ProcessInfo;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupMessage;
@@ -135,6 +137,8 @@ public class RegistryServer implements ServerCallback {
             connection.send(new ProcessListResponse(request.getRequestId(), getTerm(), listProcesses()));
         } else if (message instanceof ProcessWatchRequest) {
             ProcessWatchers.getInstance().watch(connection);
+        } else if (message instanceof VerifyInstanceRequest request) {
+            connection.send(new VerifyInstanceResponse(request.getRequestId(), verify(request)));
         } else {
             LOGGER.warn("Dropping message from {} type {}. Unhandled", connection.getRemoteAddress(),
                     message.getClass().getSimpleName());
@@ -286,6 +290,21 @@ public class RegistryServer implements ServerCallback {
                 setupMirrorRegistry(connection, message);
             }
         });
+    }
+
+    /**
+     * Whether a caller is the running instance it claims to be. The token is issued at registration and known only
+     * to that instance and the registries, so presenting it proves the identity.
+     */
+    boolean verify(VerifyInstanceRequest request) {
+        if (request.getGroup() == null || request.getName() == null || request.getAuthenticationToken() == null) {
+            return false;
+        }
+        Application application = applicationManager.findApplication(request.getGroup(), request.getName(),
+                request.getRank());
+        return application != null && application.getRank() == request.getRank() && application.isRunning()
+                && application.getAuthenticationToken() != null
+                && application.isAuthenticated(request.getAuthenticationToken());
     }
 
     /** Every application instance this registry knows, in any state, ordered by application and rank. */

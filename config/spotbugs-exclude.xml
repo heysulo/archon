@@ -37,4 +37,10 @@
         <Class name="dev.heysulo.archon.portal.db.PortalDatabase"/>
         <Method name="dataSource"/>
     </Match>
+    <!-- Sharing the pool is the point -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="dev.heysulo.archon.config.ConfigDatabase"/>
+        <Method name="dataSource"/>
+    </Match>
 </FindBugsFilter>

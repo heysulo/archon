@@ -1,5 +1,7 @@
 package dev.heysulo.archon.sdk;
 
+import dev.heysulo.archon.sdk.config.ConfigValue;
+
 /**
  * Receives what the registry decides about this application instance. Calls arrive one at a time, in order, on an
  * SDK thread rather than a network thread, so they may call blocking SDK methods such as
@@ -21,5 +23,13 @@ public interface ArchonCallback {
      */
     default void onTerminated(String reason) {
         ArchonTermination.exitProcess(reason);
+    }
+
+    /**
+     * A configuration this instance sees changed, was added ({@code oldValue} is null) or removed ({@code newValue}
+     * is null). Also called after a reconnect for values that changed meanwhile.
+     */
+    default void onConfigUpdated(String name, ConfigValue oldValue,
+            ConfigValue newValue) {
     }
 }

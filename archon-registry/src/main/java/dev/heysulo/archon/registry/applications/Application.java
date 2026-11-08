@@ -281,8 +281,14 @@ public class Application implements ConnectionCallback {
         return runLevel.getProcessState() == ProcessState.RUNNING;
     }
 
+    // Constant time, since callers can probe it over the network through re-registration and verification
     public boolean isAuthenticated(String authenticationToken) {
-        return this.authenticationToken.equals(authenticationToken);
+        if (this.authenticationToken == null || authenticationToken == null) {
+            return false;
+        }
+        return java.security.MessageDigest.isEqual(
+                this.authenticationToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                authenticationToken.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     public void setRegistryServer(RegistryServer registryServer) {

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archon-config
+  labels:
+    app: archon-config
+spec:
+  # The registry ranks one primary, which serves archon-config; the rest wait as mirrors and take over at once
+  replicas: 2
+  selector:
+    matchLabels:
+      app: archon-config
+  template:
+    metadata:
+      labels:
+        app: archon-config
+    spec:
+      containers:
+      - name: archon-config
+        image: 10.21.3.30:80/archon-config:latest
+        imagePullPolicy: Always
+        env:
+        - name: ARCHON_REGISTRY_LOCATIONS
+          value: "10.21.3.201|10.21.3.202|10.21.3.203"
+        # archon-config's port offset is 1, so the primary serves on 9101. Applications find it through the
+        # registry, at the pod's address, so no Kubernetes Service is needed.
+        - name: ARCHON_BASE_PORT
+          value: "9100"
+        - name: ARCHON_ADVERTISED_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: ARCHON_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        # Configurations live in the archon schema, through the same login as the registry and portal
+        - name: ARCHON_DB_URL
+          value: "jdbc:mysql://mysql.heysulo.internal:3306/archon"
+        - name: ARCHON_DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: archon-db
+              key: username
+        - name: ARCHON_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: archon-db
+              key: password
+        ports:
+        - containerPort: 9101
+          name: config
