@@ -36,10 +36,18 @@ public abstract class ConfigConnection implements ServiceClientCallback {
     /** Opens a connection to archon-config. */
     @FunctionalInterface
     public interface Connector {
+        /**
+         * @param serviceId archon-config's service id
+         * @param callback  hears about the connection
+         * @return the connected client
+         * @throws dev.heysulo.archon.sdk.services.ServiceException if archon-config cannot be reached yet
+         */
         ServiceClient connect(String serviceId, ServiceClientCallback callback);
     }
 
+    /** This instance's application group, sent in every hello. */
     protected final String group;
+    /** This instance's application name, sent in every hello. */
     protected final String name;
     private final IntSupplier rank;
     private final Supplier<String> token;
@@ -61,11 +69,15 @@ public abstract class ConfigConnection implements ServiceClientCallback {
         this.scheduler = scheduler;
     }
 
+    /**
+     * Starts connecting in the background, then keeps the connection up: every 2 seconds while archon-config is
+     * unreachable, every 30 while it is not defined at all. Returns at once.
+     */
     public void start() {
         scheduler.execute(this::connect);
     }
 
-    /** Disconnects for good. */
+    /** Disconnects for good, and stops reconnecting. */
     public void close() {
         closed = true;
         ServiceClient current = client;
@@ -74,20 +86,41 @@ public abstract class ConfigConnection implements ServiceClientCallback {
         }
     }
 
+    /** @return whether connected and accepted by archon-config, so requests can be sent */
     public boolean isConnected() {
         ServiceClient current = client;
         return accepted && current != null && current.isConnected();
     }
 
-    /** The hello to send on each connection. */
+    /**
+     * The hello to send on each connection.
+     *
+     * @param currentRank  this instance's rank now
+     * @param currentToken this instance's registration token now
+     * @return the hello
+     */
     protected abstract ConfigHello hello(int currentRank, String currentToken);
 
     /** A new connection is about to introduce itself: forget anything half received on the last one. */
     protected abstract void starting();
 
-    /** Everything after the hello, apart from answers to requests. */
+    /**
+     * Everything after the hello, apart from answers to requests. Called on the connection's network thread.
+     *
+     * @param message what archon-config sent
+     */
     protected abstract void received(Message message);
 
+    /**
+     * Sends a request and blocks for up to 5 seconds for the answer.
+     *
+     * @param operation what to do
+     * @param entry     what to do it to, as the operation needs it
+     * @param actor     who it is done for, recorded by archon-config; null from applications
+     * @return the configurations the answer carries
+     * @throws ConfigurationException if archon-config refuses, or cannot be reached or does not answer
+     *                                ({@link ConfigurationException#isUnavailable()})
+     */
     protected List<ConfigEntry> call(ConfigRequest.Operation operation, ConfigEntry entry, String actor) {
         ServiceClient current = client;
         if (current == null || !accepted) {

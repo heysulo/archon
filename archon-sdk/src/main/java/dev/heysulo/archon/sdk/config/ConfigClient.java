@@ -28,12 +28,18 @@ import java.util.function.Supplier;
  * possibly to a new archon-config primary, it receives everything again and reports only what really changed.
  */
 public final class ConfigClient extends ConfigConnection {
+    /** The id of archon-config's service, which this client connects to. */
     public static final String SERVICE = ConfigConnection.SERVICE;
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigClient.class);
 
-    /** Hears every value that changes: {@code oldValue} is null for a new name, {@code newValue} for a removed one. */
+    /** Hears every value that changes. Called on the connection's network thread, so it must not block. */
     @FunctionalInterface
     public interface Listener {
+        /**
+         * @param name     the configuration's name
+         * @param oldValue what was seen before, or null for a new name
+         * @param newValue what is seen now, or null for a removed name
+         */
         void changed(String name, ConfigValue oldValue, ConfigValue newValue);
     }
 
@@ -45,8 +51,16 @@ public final class ConfigClient extends ConfigConnection {
     private List<ConfigEntry> incoming;
 
     /**
-     * @param rank  this instance's current rank, which archon-config checks with the registry
-     * @param token this instance's registration token
+     * Applications use this through {@link dev.heysulo.archon.sdk.ArchonInterface}, which creates one. Call
+     * {@link #start()} to connect.
+     *
+     * @param group     this instance's application group
+     * @param name      this instance's application name
+     * @param rank      this instance's current rank, which archon-config checks with the registry
+     * @param token     this instance's registration token
+     * @param connector opens a connection to archon-config
+     * @param listener  hears every value that changes
+     * @param scheduler runs connection attempts and retries
      */
     public ConfigClient(String group, String name, IntSupplier rank, Supplier<String> token, Connector connector,
             Listener listener, ScheduledExecutorService scheduler) {
@@ -54,7 +68,12 @@ public final class ConfigClient extends ConfigConnection {
         this.listener = listener;
     }
 
-    /** Waits until the first configurations arrive. @return false if they did not arrive in time */
+    /**
+     * Waits until the first configurations arrive.
+     *
+     * @param timeoutMillis how long to wait
+     * @return true once they arrived; false if they did not in time, or the wait was interrupted
+     */
     public boolean awaitFirstSnapshot(long timeoutMillis) {
         try {
             return firstSnapshot.await(timeoutMillis, TimeUnit.MILLISECONDS);
@@ -64,10 +83,15 @@ public final class ConfigClient extends ConfigConnection {
         }
     }
 
+    /**
+     * @param configName the configuration's name
+     * @return the value this instance sees for it, from memory; empty if none is visible
+     */
     public Optional<ConfigValue> get(String configName) {
         return Optional.ofNullable(cache.get(configName));
     }
 
+    /** @return every value this instance sees, keyed by name: an unmodifiable snapshot */
     public Map<String, ConfigValue> all() {
         // Already unmodifiable; copyOf returns it as is
         return Map.copyOf(cache);
@@ -75,7 +99,11 @@ public final class ConfigClient extends ConfigConnection {
 
     /**
      * Changes the value this application sees for a name. The cache updates when archon-config pushes the change.
+     * Blocks for up to 5 seconds until archon-config answers.
      *
+     * @param configName the configuration's name
+     * @param value      the new value, in a form its type accepts
+     * @return the configuration as stored
      * @throws ConfigurationException if the name is unknown, read only, the value has the wrong type, or archon-config
      *                                cannot be reached
      */

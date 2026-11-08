@@ -8,12 +8,18 @@ import java.net.UnknownHostException;
  * balancer, the registry sees a different address, so instances tell it theirs.
  */
 public final class AdvertisedHost {
+    /** The environment variable naming the address clients reach this instance's services at. */
     public static final String ADVERTISED_HOST_ENV = "ARCHON_ADVERTISED_HOST";
 
     private AdvertisedHost() {
     }
 
-    /** {@value #ADVERTISED_HOST_ENV} if set, else this machine's address, or null to let the registry decide. */
+    /**
+     * The address to advertise for this instance's services.
+     *
+     * @return {@value #ADVERTISED_HOST_ENV} if set, else this machine's address, or null to let the registry use the
+     *         address it sees the instance connect from
+     */
     public static String fromEnvironment() {
         String configured = System.getenv(ADVERTISED_HOST_ENV);
         if (configured != null && !configured.isBlank()) {

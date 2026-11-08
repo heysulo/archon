@@ -42,6 +42,11 @@ public final class ServiceManager {
     /** Creates a server for a service. Lets tests avoid binding real ports. */
     @FunctionalInterface
     public interface ServerFactory {
+        /**
+         * @param port     the port to listen on
+         * @param callback handles the server's connections and messages
+         * @return a server, not yet listening
+         */
         Server create(int port, ServerCallback callback);
     }
 
@@ -49,9 +54,11 @@ public final class ServiceManager {
     }
 
     /**
-     * @param registry sends a message to the primary registry
-     */
-    /**
+     * Applications use this through {@link dev.heysulo.archon.sdk.ArchonInterface}, which creates one.
+     *
+     * @param group            this instance's application group
+     * @param application      this instance's application name
+     * @param registry         sends a message to the primary registry
      * @param onRegistryThread whether the calling thread is the registry connection's network thread, on which a
      *                         blocking call would wait forever for an answer that thread must deliver
      */
@@ -74,7 +81,12 @@ public final class ServiceManager {
     }
 
     /**
-     * @throws ServiceException if the service is unknown or the registry does not answer
+     * Looks up a service's definition and running instances. Blocks until the registry answers.
+     *
+     * @param serviceId the service's id
+     * @return the definition and the instances serving it, lowest rank first
+     * @throws ServiceException      if the service is unknown or the registry does not answer
+     * @throws IllegalStateException if called on the registry connection's network thread
      */
     public ServiceInfo lookup(String serviceId) {
         requireBlockingAllowed("lookupService");
@@ -91,6 +103,8 @@ public final class ServiceManager {
     /**
      * Starts serving a service on this instance's base port plus the service's offset, then announces it.
      *
+     * @param serviceId the service's id
+     * @param callback  handles the service's connections and messages
      * @param configure adjusts the server, for example its trusted packages, before it starts listening
      * @return the started server
      * @throws ServiceException if the service is unknown, belongs to another application definition, is already
@@ -142,6 +156,8 @@ public final class ServiceManager {
     /**
      * Tells the registry, then stops serving a service. Does nothing if it is not running here. Telling the registry
      * first keeps lookups from returning an instance that is shutting down.
+     *
+     * @param serviceId the service's id
      */
     public synchronized void stop(String serviceId) {
         RunningService service = running.remove(serviceId);
@@ -167,7 +183,10 @@ public final class ServiceManager {
     /**
      * Looks up a service and connects to it: to its primary, or to a random instance when load balanced.
      *
+     * @param serviceId the service's id
+     * @param callback  hears about connects, disconnects and the service's messages
      * @param configure adjusts each connection's settings, for example trusted packages, before it connects
+     * @return the connected client
      * @throws ServiceException if the service is unknown, has no instance to connect to, or the connection fails
      */
     public ServiceClient connect(String serviceId, ServiceClientCallback callback,
@@ -178,7 +197,13 @@ public final class ServiceManager {
     /**
      * Looks up a service and connects to it with the given options, blocking until connected and warmed up.
      *
-     * @throws ServiceException if the service is unknown, has no instance to connect to, or the connection fails
+     * @param serviceId the service's id
+     * @param callback  hears about connects, disconnects and the service's messages
+     * @param options   the warm-up and connection settings
+     * @return the connected client
+     * @throws ServiceException      if the service is unknown, has no instance to connect to, or the connection
+     *                               fails
+     * @throws IllegalStateException if called on the registry connection's network thread
      */
     public ServiceClient connect(String serviceId, ServiceClientCallback callback, ServiceClientOptions options) {
         requireBlockingAllowed("connectToService");
@@ -206,7 +231,12 @@ public final class ServiceManager {
         }
     }
 
-    /** Hands a registry response to the request waiting for it. */
+    /**
+     * Hands a registry response to the request waiting for it. A refusal of a service announced again after a
+     * reconnect, which nobody waits for, stops that service here.
+     *
+     * @param message a lookup or start response from the registry; others are ignored
+     */
     public void onResponse(Message message) {
         if (message instanceof ServiceLookupResponseMessage lookup) {
             requests.complete(lookup.getRequestId(), lookup);
@@ -222,6 +252,10 @@ public final class ServiceManager {
         }
     }
 
+    /**
+     * @param serviceId the service's id
+     * @return whether this instance serves it
+     */
     public boolean isRunning(String serviceId) {
         return running.containsKey(serviceId);
     }

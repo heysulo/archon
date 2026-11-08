@@ -22,6 +22,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeoutException;
 
+/**
+ * The connection to the primary registry, used by {@link ArchonInterface}; applications do not use it directly. It
+ * signs every authenticated message with this instance's registration token and hands what the registry sends to
+ * {@link ArchonInterface}. Reconnecting after a drop is up to the caller.
+ */
 public class PrimaryRegistry implements ClientCallback {
     private static final Logger LOGGER = LoggerFactory.getLogger(PrimaryRegistry.class);
     private static final long CONNECT_TIMEOUT_MILLIS = 5_000;
@@ -38,6 +43,10 @@ public class PrimaryRegistry implements ClientCallback {
         this.archonInterface = archonInterface;
     }
 
+    /**
+     * @param archonInterface receives what the registry sends; used only on the first call
+     * @return the process's single connection
+     */
     public static synchronized PrimaryRegistry getInstance(ArchonInterface archonInterface) {
         if (instance == null) {
             instance = new PrimaryRegistry(archonInterface);
@@ -45,6 +54,12 @@ public class PrimaryRegistry implements ClientCallback {
         return instance;
     }
 
+    /**
+     * Connects to a registry, replacing any earlier connection, and blocks for up to 5 seconds until connected.
+     *
+     * @param host the registry's address
+     * @throws PrimaryRegistryConnectionFailure if the connection fails or times out
+     */
     public void connect(String host) {
         connected = false;
         Client client = new Client(host, RegistryConstants.PORT, this, eventLoopGroup);
@@ -84,16 +99,25 @@ public class PrimaryRegistry implements ClientCallback {
         archonInterface.onRegistryConnectionLost();
     }
 
-    /** The token the registry issued at registration, which proves this instance's identity to other components. */
+    /**
+     * The token the registry issued at registration, which proves this instance's identity to other components.
+     *
+     * @return the token, or null before registration
+     */
     public String getAuthenticationToken() {
         return authenticationToken;
     }
 
+    /** @return whether the connection to the registry is up */
     public boolean isConnected() {
         return connected;
     }
 
-    /** Whether the calling thread is one of this connection's network threads, which must never block. */
+    /**
+     * Whether the calling thread is one of this connection's network threads, which must never block.
+     *
+     * @return true on a network thread
+     */
     public boolean isNetworkThread() {
         return EventLoops.isCurrentThreadIn(eventLoopGroup);
     }
@@ -137,6 +161,14 @@ public class PrimaryRegistry implements ClientCallback {
         LOGGER.warn("Primary registry client error", throwable);
     }
 
+    /**
+     * Sends a message to the registry, signed with the registration token if it needs one. Does not wait for it to
+     * be written.
+     *
+     * @param message the message
+     * @throws RuntimeException if not connected. After a reconnect the SDK registers again, reporting whether the
+     *                          rank was acknowledged, and announces its services again; other messages are lost
+     */
     public void sendMessage(Message message) {
         if (message instanceof AuthenticatedMessage authenticatedMessage) {
             authenticatedMessage.setAuthenticationToken(authenticationToken);

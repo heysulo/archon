@@ -33,17 +33,40 @@ public final class ConfigReplicaClient extends ConfigConnection implements Confi
     private List<ConfigRow> incoming;
     private boolean incomingReplaces;
 
+    /**
+     * Archon's components use this through
+     * {@link dev.heysulo.archon.sdk.ArchonInterface#replicateConfigs(ConfigRowSink)}. Call {@link #start()} to
+     * connect.
+     *
+     * @param group     this instance's application group; archon-config accepts only Archon's
+     * @param name      this instance's application name; archon-config accepts only {@code Portal} and {@code Config}
+     * @param rank      this instance's current rank, which archon-config checks with the registry
+     * @param token     this instance's registration token
+     * @param connector opens a connection to archon-config
+     * @param sink      keeps the rows received
+     * @param scheduler runs connection attempts and retries
+     */
     public ConfigReplicaClient(String group, String name, IntSupplier rank, Supplier<String> token,
             Connector connector, ConfigRowSink sink, ScheduledExecutorService scheduler) {
         super(group, name, rank, token, connector, scheduler);
         this.sink = sink;
     }
 
-    /** Whether everything has arrived at least once. Later it may lag a moment behind while reconnecting. */
+    /**
+     * Whether everything has arrived at least once. Later it may lag a moment behind while reconnecting.
+     *
+     * @return true once the first full batch was applied
+     */
     public boolean isSynced() {
         return synced;
     }
 
+    /**
+     * Waits until everything has arrived once.
+     *
+     * @param timeoutMillis how long to wait
+     * @return true once synced; false if not in time, or the wait was interrupted
+     */
     public boolean awaitSynced(long timeoutMillis) {
         try {
             return firstSync.await(timeoutMillis, TimeUnit.MILLISECONDS);

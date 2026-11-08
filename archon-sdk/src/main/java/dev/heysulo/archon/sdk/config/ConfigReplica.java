@@ -69,15 +69,25 @@ public final class ConfigReplica implements ConfigRowSink {
         }
     }
 
-    /** Every configuration, in order. A live view: it reflects changes made while iterating it. */
+    /**
+     * Every configuration, in order. A live view: it reflects changes made while iterating it, and never throws for
+     * them.
+     *
+     * @return the configurations, unmodifiable
+     */
     public Collection<ConfigEntry> entries() {
         return Collections.unmodifiableCollection(sorted.values());
     }
 
+    /** @return how many configurations are held, deleted ones not counted */
     public int size() {
         return sorted.size();
     }
 
+    /**
+     * @param id a configuration's id
+     * @return it, unless there is none or it was deleted
+     */
     public Optional<ConfigEntry> get(long id) {
         synchronized (lock) {
             ConfigRow row = byId.get(id);

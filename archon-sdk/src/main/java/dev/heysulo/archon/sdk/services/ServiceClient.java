@@ -21,9 +21,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
- * A connection to a service, found through the registry. Connects to the primary of a primary/mirror service, or
- * to a random instance of a load balanced one. When the connection drops it looks the service up again and
- * reconnects, so it follows the service to a new primary.
+ * A connection to a service, found through the registry, from
+ * {@link dev.heysulo.archon.sdk.ArchonInterface#connectToService(String, ServiceClientCallback)}. Connects to the
+ * serving instance of a primary/mirror service, or to a random instance of a load balanced one. When the connection
+ * drops it looks the service up again and reconnects, every second until it succeeds, so it follows the service to
+ * a new primary. Its callback hears about each disconnect and connect. Thread safe.
  */
 public final class ServiceClient implements AutoCloseable {
     static final long RECONNECT_DELAY_MILLIS = 1_000;
@@ -76,21 +78,32 @@ public final class ServiceClient implements AutoCloseable {
         attempt();
     }
 
+    /** @return the id of the service this client connects to */
     public String getServiceId() {
         return serviceId;
     }
 
-    /** The instance this client is connected to, if it is connected. */
+    /**
+     * The instance this client is connected to.
+     *
+     * @return it, while connected and warmed up; empty while connecting or reconnecting, and once closed
+     */
     public Optional<ServiceEndpoint> getEndpoint() {
         Attempt attempt = active;
         return attempt != null && attempt.isReady() ? Optional.of(attempt.endpoint) : Optional.empty();
     }
 
+    /** @return whether messages can be sent now: connected and warmed up */
     public boolean isConnected() {
         return getEndpoint().isPresent();
     }
 
     /**
+     * Sends a message to the instance this client is connected to. Does not wait for it to be written, or answered;
+     * answers arrive through the callback.
+     *
+     * @param message the message; its classes must be trusted by the service, see
+     *                {@link ServiceClientOptions#withSettings}
      * @throws ServiceException if not connected, for example while reconnecting
      */
     public void send(Message message) {
@@ -101,7 +114,7 @@ public final class ServiceClient implements AutoCloseable {
         attempt.connection.send(message);
     }
 
-    /** Disconnects and stops reconnecting. */
+    /** Disconnects and stops reconnecting, for good. Safe to call more than once. */
     @Override
     public void close() {
         closed = true;
@@ -111,6 +124,7 @@ public final class ServiceClient implements AutoCloseable {
         }
     }
 
+    /** @return whether {@link #close()} was called */
     public boolean isClosed() {
         return closed;
     }

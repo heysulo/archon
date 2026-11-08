@@ -34,6 +34,7 @@ public class RegistryLookupService {
     private RegistryLookupService() {
     }
 
+    /** @return the process's single lookup service */
     public static synchronized RegistryLookupService getInstance() {
         if (instance == null) {
             instance = new RegistryLookupService();
@@ -42,7 +43,11 @@ public class RegistryLookupService {
     }
 
     /**
-     * Returns the location of the primary registry, or {@code null} if none could be found.
+     * Asks every registry in {@code ARCHON_REGISTRY_LOCATIONS} which is primary, each with its own connection, and
+     * picks it. If two claim to be primary for a moment, as when a cut-off primary has not yet been voted out, the
+     * one with the newer term wins. Blocks for up to 2 seconds per registry to connect and 5 more to answer.
+     *
+     * @return the primary registry's address, or {@code null} if none answered as primary
      */
     public String search() {
         String location = choosePrimary(RegistryConstants.getRegistryLocations(), this::primaryTerm);
@@ -109,6 +114,8 @@ public class RegistryLookupService {
     /**
      * Records a term reported by the registry. Lookups compare the terms registries answer with directly, so this
      * is informational.
+     *
+     * @param term the primary registry's term, which grows with every election
      */
     public void observeTerm(long term) {
         LOGGER.debug("Registry reported term {}", term);

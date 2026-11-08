@@ -4,12 +4,20 @@ import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
 
 /** Works out the port an application instance serves a service on: its base port plus the service's offset. */
 public final class ServicePorts {
+    /** The environment variable holding this instance's base port, which service port offsets are added to. */
     public static final String BASE_PORT_ENV = "ARCHON_BASE_PORT";
     private static final int MAX_PORT = 65535;
 
     private ServicePorts() {
     }
 
+    /**
+     * The port this instance serves a service on: {@value #BASE_PORT_ENV} plus the service's offset.
+     *
+     * @param definition the service, for its offset
+     * @return the port
+     * @throws ServiceException if {@value #BASE_PORT_ENV} is not set, not a number, or the sum is not a valid port
+     */
     public static int fromEnvironment(ServiceDefinition definition) {
         return resolve(System.getenv(BASE_PORT_ENV), definition);
     }
