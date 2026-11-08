@@ -1,5 +1,5 @@
 import { process, snapshot } from "../../test/fixtures";
-import { groupProcesses, matches, roleOf, stateTone, summarize } from "./model";
+import { groupProcesses, matches, roleOf, serviceLabel, stateTone, summarize } from "./model";
 
 describe("roleOf", () => {
   it("names leaders and standbys of applications", () => {
@@ -67,6 +67,13 @@ describe("groupProcesses", () => {
 });
 
 describe("summarize", () => {
+  it("drops the address from a service served where the row's address already says", () => {
+    expect(serviceLabel("ping@192.168.192.123:9001", "192.168.192.123")).toBe("ping:9001");
+    expect(serviceLabel("ping@10.0.0.9:9001", "192.168.192.123")).toBe("ping@10.0.0.9:9001");
+    expect(serviceLabel("ping@10.0.0.9:9001", undefined)).toBe("ping@10.0.0.9:9001");
+    expect(serviceLabel("odd", "10.0.0.9")).toBe("odd");
+  });
+
   it("counts running instances, their applications and services", () => {
     expect(summarize(snapshot.processes)).toEqual({ running: 4, applications: 2, services: 1 });
   });

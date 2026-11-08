@@ -22,7 +22,7 @@ describe("ProcessesPage", () => {
 
     expect(screen.getByText("hello-world-java-4vsbc")).toBeInTheDocument();
     expect(screen.getByText("192.168.192.78")).toBeInTheDocument();
-    expect(screen.getByText("ping@192.168.192.78:9001")).toBeInTheDocument();
+    expect(screen.getByText("ping:9001")).toBeInTheDocument();
     expect(screen.getByText("archon-registry-1")).toBeInTheDocument();
     expect(screen.queryByText("hello-world-java-dead1")).not.toBeInTheDocument();
   });

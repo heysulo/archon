@@ -1,6 +1,6 @@
 import { Badge, Box, Card, Code, Group, Table, Text } from "@mantine/core";
 import type { ProcessInfo } from "../../api/types";
-import { roleOf, stateTone, type ApplicationGroup } from "./model";
+import { roleOf, serviceLabel, stateTone, type ApplicationGroup } from "./model";
 
 function Detail({ value }: { value: string | undefined }) {
   return value ? (
@@ -61,7 +61,9 @@ function Row({ process, showNode }: { process: ProcessInfo; showNode: boolean })
         {process.services.length ? (
           <Group gap={4}>
             {process.services.map((service) => (
-              <Code key={service}>{service}</Code>
+              <Code key={service} title={service}>
+                {serviceLabel(service, process.details?.address)}
+              </Code>
             ))}
           </Group>
         ) : (

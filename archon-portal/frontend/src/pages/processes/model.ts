@@ -1,3 +1,4 @@
+import { parseServed } from "../services/model";
 import type { ProcessInfo } from "../../api/types";
 
 /** Archon's own components, the registries and portals, rank as one primary and any number of mirrors. */
@@ -92,4 +93,14 @@ export function summarize(processes: ProcessInfo[]): Summary {
     applications: new Set(running.map((process) => `${process.group}/${process.name}`)).size,
     services: running.reduce((count, process) => count + process.services.length, 0),
   };
+}
+
+/**
+ * A service as the process row shows it: `ping:9001`, since the row already shows the instance's address. One served
+ * on another address keeps it, `ping@10.0.0.9:9001`, so that is not lost.
+ */
+export function serviceLabel(service: string, address: string | undefined): string {
+  const served = parseServed(service);
+  if (!served) return service;
+  return served.host === address ? `${served.id}:${served.port}` : service;
 }
