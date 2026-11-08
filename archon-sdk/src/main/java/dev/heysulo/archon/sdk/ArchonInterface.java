@@ -51,6 +51,9 @@ public class ArchonInterface {
     private volatile Reconnector reconnector;
     private volatile boolean terminated;
     private volatile ConfigClient configs;
+    // The rank the application last acknowledged, reset whenever the rank changes
+    private volatile int acknowledgedRank = RANK_UNKNOWN;
+    private final Object rankLock = new Object();
     // How long initialize waits for the first configurations when archon-config is running
     private static final long FIRST_CONFIG_WAIT_MILLIS = 5_000;
     // Rank and termination callbacks, one at a time and in order, never on a network thread
@@ -74,7 +77,7 @@ public class ArchonInterface {
         LOGGER.info("Initializing ArchonInterface");
         this.groupName = groupName;
         this.applicationName = applicationName;
-        this.events = new RegistryEvents(callback, this::confirmRank, callbackThread);
+        this.events = new RegistryEvents(callback, callbackThread);
         this.services = new ServiceManager(groupName, applicationName, message -> primaryRegistry.sendMessage(message),
                 this::isRegistryNetworkThread);
         // Created first, so a drop straight after connecting is not missed
@@ -198,8 +201,11 @@ public class ArchonInterface {
     }
 
     // Runs on the reconnect thread once connected to a primary registry again
+    // The registry restores the instance as running only if it had acknowledged its rank
     private void restoreRegistration() {
-        primaryRegistry.sendMessage(createRegistrationMessage(rank));
+        ApplicationRegistrationMessage message = createRegistrationMessage(rank);
+        message.setReady(acknowledgedRank == rank);
+        primaryRegistry.sendMessage(message);
         services.announceAll();
     }
 
@@ -285,32 +291,51 @@ public class ArchonInterface {
     /** Called on a network thread. The application hears about it on the callback thread. */
     public void onRankUpdateMessage(int newRank) {
         LOGGER.info("Received rank update. {} -> {}", rank, newRank);
-        rank = newRank;
+        synchronized (rankLock) {
+            rank = newRank;
+            acknowledgedRank = RANK_UNKNOWN;
+        }
         rankUpdateAvailable = true;
         events.rankChanged(newRank);
     }
 
     /**
-     * Confirms a rank to the registry.
+     * Tells the registry this instance is ready for its rank, moving it from starting (or changing, after a
+     * promotion) to running. Call it from or after {@link ArchonCallback#onRankUpdateMessage}, once the role's work
+     * is done: services started, connections made and warmed up. Until then the instance cannot be promoted.
      *
-     * @deprecated The SDK confirms every rank itself once {@link ArchonCallback#onRankUpdateMessage} returns.
-     *             Calling this as well is harmless.
+     * <p>A rank other than the current one is ignored: the rank changed again meanwhile, and the registry would treat
+     * the stale acknowledgement as a mismatch and stop this instance. Acknowledging the same rank twice is harmless.
+     * After a reconnect the SDK tells the registry itself whether the rank was acknowledged.
+     *
+     * @return whether the acknowledgement was sent
      */
-    @Deprecated
-    public void acknowledgeRank(int rank) {
-        confirmRank(rank);
+    public boolean acknowledgeRank(int acknowledged) {
+        if (terminated) {
+            return false;
+        }
+        // Held while checking and sending, so the rank cannot change in between
+        synchronized (rankLock) {
+            if (acknowledged != rank) {
+                LOGGER.info("Not acknowledging rank {}: this instance's rank is now {}", acknowledged, rank);
+                return false;
+            }
+            acknowledgedRank = acknowledged;
+            try {
+                primaryRegistry.sendMessage(new ApplicationRankUpdate(acknowledged));
+                LOGGER.info("Acknowledged rank {}", acknowledged);
+                return true;
+            } catch (RuntimeException e) {
+                // Disconnected. Re-registering after the reconnect reports the rank as acknowledged.
+                LOGGER.warn("Could not acknowledge rank {} yet: {}", acknowledged, e.getMessage());
+                return false;
+            }
+        }
     }
 
-    private void confirmRank(int confirmedRank) {
-        if (terminated) {
-            return;
-        }
-        try {
-            primaryRegistry.sendMessage(new ApplicationRankUpdate(confirmedRank));
-        } catch (RuntimeException e) {
-            // Disconnected. Re-registering after the reconnect confirms the rank again.
-            LOGGER.warn("Could not confirm rank {}: {}", confirmedRank, e.getMessage());
-        }
+    /** Whether this instance has acknowledged its current rank. */
+    public boolean isRankAcknowledged() {
+        return rank != RANK_UNKNOWN && acknowledgedRank == rank;
     }
 
     /**

@@ -205,25 +205,42 @@ public class Application implements ConnectionCallback {
         LOGGER.info("Synced application {}. Run Level: {}", application.getDisplayName(), application.getRunLevel());
     }
 
+    /**
+     * The instance is ready for its rank. An acknowledgement of an older rank crossed a newer one on the wire, as
+     * when the instance was promoted while finishing its last role; it is ignored, and the instance acknowledges the
+     * new rank once ready for it.
+     */
     private void handleApplicationRankUpdate(ApplicationRankUpdate rankUpdate) {
         if (rankUpdate.getRank() != rank) {
-            askToDie(String.format("Rank confirmation mismatch. Expected %d, got %d", getRank(), rankUpdate.getRank()));
+            LOGGER.warn("{} acknowledged rank {}, but its rank is now {}. Waiting for it to acknowledge {}",
+                    getDisplayName(), rankUpdate.getRank(), rank, rank);
             return;
         }
         setRunLevel(RunLevel.RUNNING);
-        if (isRegistryInstance() && rank != RANK_PRIMARY && registryServer != null) {
-            registryServer.sendStateSnapshot(this);
+        if (isRegistryInstance()) {
+            if (rank != RANK_PRIMARY && registryServer != null) {
+                registryServer.sendStateSnapshot(this);
+            }
+            return;
+        }
+        if (rank != RANK_PRIMARY) {
+            electLeaderIfNoneIsLive();
         }
     }
 
-    private void askToDie(String reason) {
-        LOGGER.error("Asking {} to die. Reason: {}", getDisplayName(), reason);
-        try {
-            connection.disconnect();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-        setRunLevel(RunLevel.TERMINATED);
+    /**
+     * Only ready instances can be promoted. If the leader went while every other instance was still getting ready,
+     * no one was promoted then; the first to become ready is now.
+     */
+    public void electLeaderIfNoneIsLive() {
+        ApplicationManager.withNamespaceLock(group, name, () -> {
+            ApplicationManager manager = ApplicationManager.getInstance();
+            if (!manager.hasLivePrimary(group, name)) {
+                LOGGER.info("{} has no live leader. Electing one now that {} is ready", group + "/" + name,
+                        getDisplayName());
+                manager.electLeader(group, name);
+            }
+        });
     }
 
     @Override

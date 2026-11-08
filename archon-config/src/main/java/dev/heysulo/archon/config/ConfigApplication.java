@@ -105,9 +105,12 @@ public final class ConfigApplication implements ArchonCallback {
     }
 
     // Runs on the role thread
+    // Acknowledges the rank once the role is in place: serving as primary, or replicating as a mirror. A mirror can
+    // take over even before it has caught up, since a new primary reads the database first.
     private void applyRole() {
+        int target = rank;
         try {
-            if (rank == RegistryProtocol.RANK_PRIMARY) {
+            if (target == RegistryProtocol.RANK_PRIMARY) {
                 if (server == null) {
                     stopReplicating();
                     // Whatever the old primary wrote but never pushed is in the database
@@ -126,6 +129,7 @@ public final class ConfigApplication implements ArchonCallback {
                     LOGGER.info("--------------- MIRROR: replicating from the primary ---------------");
                 }
             }
+            archon.acknowledgeRank(target);
         } catch (ServiceException e) {
             // The registry may not know the service yet, or the port is still in use after a failover
             if (!String.valueOf(e.getMessage()).equals(waitingFor)) {

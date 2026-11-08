@@ -97,6 +97,12 @@ public class ApplicationManager {
         return application;
     }
 
+    /** Whether a rank 1 instance of the definition is up, ready or still getting ready. */
+    public boolean hasLivePrimary(String group, String name) {
+        return findAllApplications(group, name).stream()
+                .anyMatch(app -> app.getRank() == Constants.RANK_PRIMARY && app.isRunning() && app.isConnected());
+    }
+
     public void electLeader(String group, String name) {
         String appDefName = buildApplicationDefinitionName(group, name);
         LOGGER.info("Electing leader for app definition: {}", appDefName);

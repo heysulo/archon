@@ -154,7 +154,7 @@ public class RegistryServer implements ServerCallback {
             reRegisterApplicationInstance(
                     registrationMessage.getGroupName(), registrationMessage.getApplicationName(),
                     registrationMessage.getRank(), registrationMessage.getAuthenticationToken(),
-                    detailsOf(registrationMessage, connection), connection);
+                    detailsOf(registrationMessage, connection), registrationMessage.getReady(), connection);
         }
     }
 
@@ -178,8 +178,12 @@ public class RegistryServer implements ServerCallback {
         });
     }
 
+    /**
+     * @param ready whether the instance had acknowledged its rank; null from older SDKs, which always had. One that
+     *              had not is restored as starting, and becomes running when it acknowledges.
+     */
     private void reRegisterApplicationInstance(String group, String name, int rank, String authenticationToken,
-            InstanceDetails details, Connection connection) {
+            InstanceDetails details, Boolean ready, Connection connection) {
         ApplicationManager.withNamespaceLock(group, name, () -> {
             Application application = applicationManager.findApplication(group, name, rank);
             if (application == null) {
@@ -196,7 +200,11 @@ public class RegistryServer implements ServerCallback {
             }
             application.setDetails(details);
             application.setConnection(connection);
-            application.setRunLevel(RunLevel.RUNNING);
+            boolean wasReady = !Boolean.FALSE.equals(ready);
+            application.setRunLevel(wasReady ? RunLevel.RUNNING : RunLevel.STARTING);
+            if (wasReady && rank != RANK_PRIMARY) {
+                application.electLeaderIfNoneIsLive();
+            }
             LOGGER.info("Application {} re-registered with client: {}", application.getDisplayName(),
                     connection.getRemoteAddress());
         });

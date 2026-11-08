@@ -2,11 +2,13 @@ package dev.heysulo.archon.portal;
 
 import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.sdk.ArchonCallback;
+import dev.heysulo.archon.sdk.ArchonInterface;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.function.IntPredicate;
 
 /**
  * This portal replica's place in the cluster. Every replica registers as {@code Archon / Portal}: the registry ranks
@@ -19,7 +21,17 @@ final class PortalIdentity implements ArchonCallback {
     private static final Logger LOGGER = LoggerFactory.getLogger(PortalIdentity.class);
 
     private final String host = hostName();
+    private final IntPredicate acknowledge;
     private volatile int rank = RegistryProtocol.RANK_UNKNOWN;
+
+    PortalIdentity() {
+        this(rank -> ArchonInterface.getInstance().acknowledgeRank(rank));
+    }
+
+    /** @param acknowledge tells the registry this replica is ready for a rank */
+    PortalIdentity(IntPredicate acknowledge) {
+        this.acknowledge = acknowledge;
+    }
 
     @Override
     public void onRankUpdateMessage(int newRank) {
@@ -28,6 +40,8 @@ final class PortalIdentity implements ArchonCallback {
         if (previous != newRank) {
             LOGGER.info("--------------- Portal is {} (rank {}) ---------------", role(newRank), newRank);
         }
+        // Every replica serves the same way whatever its rank, and was serving before it registered: it is ready
+        acknowledge.test(newRank);
     }
 
     String getHost() {

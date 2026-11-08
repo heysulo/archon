@@ -10,8 +10,11 @@ import dev.heysulo.archon.sdk.config.ConfigValue;
 public interface ArchonCallback {
 
     /**
-     * This instance's rank was assigned or changed. Rank 1 is the application's leader. The SDK confirms the rank to
-     * the registry once this returns, so switch roles before returning.
+     * This instance's rank was assigned or changed. Rank 1 is the application's leader. The registry holds the
+     * instance as starting (or changing) until it calls {@link ArchonInterface#acknowledgeRank} with this rank: do
+     * whatever the new role needs first, such as starting its services, connecting to others' and warming up, then
+     * acknowledge. Only acknowledged instances can be promoted when the leader goes. This may run again with a new
+     * rank before the last one was acknowledged; acknowledge the newest.
      */
     void onRankUpdateMessage(int newRank);
 

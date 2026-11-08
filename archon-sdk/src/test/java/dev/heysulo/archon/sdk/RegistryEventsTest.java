@@ -28,20 +28,21 @@ public class RegistryEventsTest {
         executor.shutdownNow();
     }
 
+    // The application acknowledges each rank itself, once ready; delivering it acknowledges nothing
     @Test
-    public void confirmsARankOnlyAfterTheCallbackReturns() throws Exception {
-        RegistryEvents events = new RegistryEvents(callback(false), rank -> calls.add("confirm " + rank), executor);
+    public void deliversRanksInOrderWithoutAcknowledging() throws Exception {
+        RegistryEvents events = new RegistryEvents(callback(false), executor);
 
         events.rankChanged(1);
         events.rankChanged(2);
         drain();
 
-        Assert.assertEquals(calls, List.of("callback 1", "confirm 1", "callback 2", "confirm 2"));
+        Assert.assertEquals(calls, List.of("callback 1", "callback 2"));
     }
 
     @Test
     public void callbacksRunOffTheCallingThread() throws Exception {
-        RegistryEvents events = new RegistryEvents(callback(false), rank -> { }, executor);
+        RegistryEvents events = new RegistryEvents(callback(false), executor);
         events.rankChanged(3);
         drain();
         Assert.assertNotNull(callbackThread);
@@ -49,16 +50,17 @@ public class RegistryEventsTest {
     }
 
     @Test
-    public void aFailingCallbackStillConfirmsTheRank() throws Exception {
-        RegistryEvents events = new RegistryEvents(callback(true), rank -> calls.add("confirm " + rank), executor);
+    public void aFailingCallbackDoesNotStopLaterOnes() throws Exception {
+        RegistryEvents events = new RegistryEvents(callback(true), executor);
         events.rankChanged(4);
+        events.terminated("done");
         drain();
-        Assert.assertEquals(calls, List.of("callback 4", "confirm 4"));
+        Assert.assertEquals(calls, List.of("callback 4", "terminated done"));
     }
 
     @Test
     public void deliversTermination() throws Exception {
-        RegistryEvents events = new RegistryEvents(callback(false), rank -> { }, executor);
+        RegistryEvents events = new RegistryEvents(callback(false), executor);
         events.terminated("Rank is held by another running instance");
         drain();
         Assert.assertEquals(calls, List.of("terminated Rank is held by another running instance"));

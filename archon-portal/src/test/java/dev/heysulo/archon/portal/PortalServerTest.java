@@ -46,7 +46,7 @@ public class PortalServerTest {
             new ProcessInfo("Group", "Application", 2, "KILLED", false, false, List.of(), null);
 
     private final HttpClient http = HttpClient.newHttpClient();
-    private final PortalIdentity identity = new PortalIdentity();
+    private final PortalIdentity identity = new PortalIdentity(rank -> true);
     private final FakeFeed feed = new FakeFeed();
     private final FakeConfigs configs = new FakeConfigs();
     private TestDatabase database;

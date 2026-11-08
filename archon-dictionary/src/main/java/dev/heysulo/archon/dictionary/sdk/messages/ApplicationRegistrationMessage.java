@@ -58,4 +58,18 @@ public class ApplicationRegistrationMessage extends AuthenticatedMessage {
     public void setDetails(InstanceDetails details) {
         this.details = details;
     }
+
+    /**
+     * On re-registration, whether the instance had acknowledged its rank, so the registry restores it as running
+     * rather than starting. Null from older SDKs, which acknowledged every rank at once, and counts as ready.
+     */
+    private Boolean ready;
+
+    public Boolean getReady() {
+        return ready;
+    }
+
+    public void setReady(Boolean ready) {
+        this.ready = ready;
+    }
 }
