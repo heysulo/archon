@@ -13,25 +13,20 @@ import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.io.StringReader;
 import java.util.List;
 
 public class ServiceRegistryTest {
 
-    private static final String CATALOG = """
-            {"services": [
-              {"id": "orders", "name": "Orders", "portOffset": 1, "group": "Shop", "application": "OrderApp",
-               "mode": "PRIMARY_MIRROR"},
-              {"id": "search", "name": "Search", "portOffset": 2, "group": "Shop", "application": "SearchApp",
-               "mode": "LOAD_BALANCE"}
-            ]}""";
+    private static final List<ServiceCatalog.Row> CATALOG = List.of(
+            new ServiceCatalog.Row("orders", "Orders", 1, "Shop", "OrderApp", "PRIMARY_MIRROR"),
+            new ServiceCatalog.Row("search", "Search", 2, "Shop", "SearchApp", "LOAD_BALANCE"));
 
     private ServiceRegistry registry;
 
     @BeforeMethod
     public void freshRegistry() {
         registry = new ServiceRegistry();
-        registry.setCatalog(ServiceCatalog.parse(new StringReader(CATALOG)));
+        registry.setCatalog(ServiceCatalog.fromRows(CATALOG));
     }
 
     @Test

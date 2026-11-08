@@ -26,8 +26,20 @@ spec:
               fieldPath: metadata.name
         - name: ARCHON_REGISTRY_LOCATIONS
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
-        - name: ARCHON_SERVICES_FILE
-          value: /etc/archon/services.json
+        - name: ARCHON_DB_URL
+          value: "jdbc:mysql://mysql.heysulo.internal:3306/archon"
+        # Created by hand, never committed:
+        #   kubectl create secret generic archon-db --from-literal=username=... --from-literal=password=...
+        - name: ARCHON_DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: archon-db
+              key: username
+        - name: ARCHON_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: archon-db
+              key: password
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -39,11 +51,3 @@ spec:
         ports:
         - containerPort: 8080
           name: web
-        volumeMounts:
-        - name: services
-          mountPath: /etc/archon
-          readOnly: true
-      volumes:
-      - name: services
-        configMap:
-          name: archon-services

@@ -1,17 +1,16 @@
 package dev.heysulo.archon.registry.services;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonParseException;
 import dev.heysulo.archon.dictionary.sdk.enums.ServiceMode;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
+import dev.heysulo.archon.registry.db.Database;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,21 +18,14 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The services the registry knows about, loaded once from a JSON file. Every registry loads the same file, so a
- * promoted mirror serves the same definitions.
- *
- * <pre>
- * {
- *   "services": [
- *     { "id": "orders", "name": "Order Service", "portOffset": 1,
- *       "group": "Shop", "application": "OrderApp", "mode": "PRIMARY_MIRROR" }
- *   ]
- * }
- * </pre>
+ * The services the registry knows about, loaded once at startup from the {@code services} table of the archon
+ * schema. Every registry reads the same table, so a promoted mirror serves the same definitions.
  */
 public final class ServiceCatalog {
-    public static final String SERVICES_FILE_ENV = "ARCHON_SERVICES_FILE";
+    static final String QUERY = "SELECT id, name, port_offset, app_group, app_name, mode FROM services ORDER BY id";
     private static final Logger LOGGER = LoggerFactory.getLogger(ServiceCatalog.class);
+    private static final int LOAD_ATTEMPTS = 10;
+    private static final long LOAD_RETRY_DELAY_MILLIS = 3_000;
 
     private final Map<String, ServiceDefinition> definitions;
 
@@ -45,44 +37,60 @@ public final class ServiceCatalog {
         return new ServiceCatalog(Map.of());
     }
 
-    /** Loads the file named by {@value #SERVICES_FILE_ENV}, or returns an empty catalog when it is not set. */
-    public static ServiceCatalog fromEnvironment() {
-        String file = System.getenv(SERVICES_FILE_ENV);
-        if (file == null || file.isBlank()) {
-            LOGGER.warn("{} is not set. No services are defined", SERVICES_FILE_ENV);
+    /**
+     * Loads the services from the database configured in the environment, or returns an empty catalog when none is.
+     * Retries for a while, as the database may still be starting.
+     *
+     * @throws IllegalStateException if the database stays unreachable or holds an invalid service. A registry
+     *                               without its services would refuse every one, so it does not start instead.
+     */
+    public static ServiceCatalog fromEnvironment() throws InterruptedException {
+        Optional<Database> database = Database.fromEnvironment();
+        if (database.isEmpty()) {
+            LOGGER.warn("{} is not set. No services are defined", Database.URL_ENV);
             return empty();
         }
-        ServiceCatalog catalog = load(Path.of(file));
-        LOGGER.info("Loaded {} service definitions from {}", catalog.size(), file);
-        return catalog;
+        return load(database.get());
     }
 
-    /**
-     * @throws IllegalStateException if the file cannot be read or holds an invalid definition. A registry with a
-     *                               broken catalog would hand out wrong ports, so it refuses to start instead.
-     */
-    public static ServiceCatalog load(Path file) {
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            return parse(reader);
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot read service definitions from " + file, e);
-        }
-    }
-
-    static ServiceCatalog parse(Reader json) {
-        CatalogFile file;
-        try {
-            file = new Gson().fromJson(json, CatalogFile.class);
-        } catch (JsonParseException e) {
-            throw new IllegalStateException("Service definitions are not valid JSON: " + e.getMessage(), e);
-        }
-        Map<String, ServiceDefinition> definitions = new LinkedHashMap<>();
-        if (file != null && file.services != null) {
-            for (ServiceEntry entry : file.services) {
-                ServiceDefinition definition = entry.toDefinition();
-                if (definitions.putIfAbsent(definition.id(), definition) != null) {
-                    throw new IllegalStateException("Service " + definition.id() + " is defined more than once");
+    static ServiceCatalog load(Database database) throws InterruptedException {
+        SQLException lastFailure = null;
+        for (int attempt = 1; attempt <= LOAD_ATTEMPTS; attempt++) {
+            try (Connection connection = database.connect()) {
+                ServiceCatalog catalog = load(connection);
+                LOGGER.info("Loaded {} service definitions from {}", catalog.size(), database);
+                return catalog;
+            } catch (SQLException e) {
+                lastFailure = e;
+                LOGGER.warn("Cannot load services from {} (attempt {} of {}): {}", database, attempt, LOAD_ATTEMPTS,
+                        e.getMessage());
+                if (attempt < LOAD_ATTEMPTS) {
+                    Thread.sleep(LOAD_RETRY_DELAY_MILLIS);
                 }
+            }
+        }
+        throw new IllegalStateException("Cannot load services from " + database, lastFailure);
+    }
+
+    static ServiceCatalog load(Connection connection) throws SQLException {
+        List<Row> rows = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(QUERY);
+             ResultSet result = statement.executeQuery()) {
+            while (result.next()) {
+                rows.add(new Row(result.getString("id"), result.getString("name"),
+                        result.getObject("port_offset", Integer.class), result.getString("app_group"),
+                        result.getString("app_name"), result.getString("mode")));
+            }
+        }
+        return fromRows(rows);
+    }
+
+    static ServiceCatalog fromRows(List<Row> rows) {
+        Map<String, ServiceDefinition> definitions = new LinkedHashMap<>();
+        for (Row row : rows) {
+            ServiceDefinition definition = row.toDefinition();
+            if (definitions.putIfAbsent(definition.id(), definition) != null) {
+                throw new IllegalStateException("Service " + definition.id() + " is defined more than once");
             }
         }
         return new ServiceCatalog(Map.copyOf(definitions));
@@ -100,26 +108,16 @@ public final class ServiceCatalog {
         return definitions.size();
     }
 
-    // Gson fills these by reflection
-    private static final class CatalogFile {
-        private List<ServiceEntry> services;
-    }
-
-    private static final class ServiceEntry {
-        private String id;
-        private String name;
-        private Integer portOffset;
-        private String group;
-        private String application;
-        private String mode;
+    /** One row of the services table, checked before it becomes a definition. */
+    record Row(String id, String name, Integer portOffset, String group, String application, String mode) {
 
         ServiceDefinition toDefinition() {
             String label = id == null ? "A service" : "Service " + id;
             require(id, label, "id");
             require(name, label, "name");
-            require(portOffset, label, "portOffset");
-            require(group, label, "group");
-            require(application, label, "application");
+            require(portOffset, label, "port_offset");
+            require(group, label, "app_group");
+            require(application, label, "app_name");
             require(mode, label, "mode");
             try {
                 return new ServiceDefinition(id, name, portOffset, group, application, ServiceMode.valueOf(mode));
@@ -128,9 +126,9 @@ public final class ServiceCatalog {
             }
         }
 
-        private static void require(Object value, String label, String field) {
+        private static void require(Object value, String label, String column) {
             if (value == null || value instanceof String text && text.isBlank()) {
-                throw new IllegalStateException(label + " is missing " + field);
+                throw new IllegalStateException(label + " is missing " + column);
             }
         }
     }
