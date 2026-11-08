@@ -6,6 +6,7 @@ import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupResponseMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceStartResponseMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceStartedMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceStoppedMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceWarmupMessage;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceEndpoint;
 import dev.heysulo.databridge.core.common.Connection;
@@ -119,6 +120,37 @@ public class ServiceManagerTest {
     }
 
     @Test
+    public void theServiceAnswersWarmupsWithoutTheApplication() {
+        List<Message> delivered = new ArrayList<>();
+        ServerCallback application = new ServerCallback() {
+            public void onConnect(Server server, Connection connection) { }
+            public void onDisconnect(Server server, Connection connection) { }
+            public void onError(Server server, Connection connection, Throwable cause) { }
+            public void onMessage(Server server, Connection connection, Message message) {
+                delivered.add(message);
+            }
+        };
+        manager.start("orders", application, server -> { });
+        List<Message> replies = new ArrayList<>();
+        Connection connection = (Connection) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[] {Connection.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("send")) {
+                        replies.add((Message) args[0]);
+                    }
+                    return null;
+                });
+
+        servers.get(0).callback.onMessage(servers.get(0), connection, new ServiceWarmupMessage(1, 42, false));
+        Message other = new Message() {
+        };
+        servers.get(0).callback.onMessage(servers.get(0), connection, other);
+
+        Assert.assertEquals(replies.size(), 1);
+        Assert.assertTrue(((ServiceWarmupMessage) replies.get(0)).isReply());
+        Assert.assertEquals(delivered, List.of(other));
+    }
+
+    @Test
     public void anotherApplicationCannotStartTheService() {
         manager = owner("SearchApp");
         ServiceException e = Assert.expectThrows(ServiceException.class,
@@ -187,12 +219,14 @@ public class ServiceManagerTest {
 
     private static final class FakeServer extends Server {
         private final int port;
+        private final ServerCallback callback;
         private boolean started;
         private boolean stopped;
 
         FakeServer(int port, ServerCallback callback) {
             super(port, callback);
             this.port = port;
+            this.callback = callback;
         }
 
         @Override

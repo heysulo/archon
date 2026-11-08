@@ -1,6 +1,7 @@
 package dev.heysulo.archon.sdk.services;
 
 import dev.heysulo.archon.dictionary.sdk.enums.ServiceMode;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceWarmupMessage;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceEndpoint;
 import dev.heysulo.databridge.core.common.Message;
@@ -33,6 +34,7 @@ public class ServiceClientTest {
     private ServiceInfo registryAnswer;
     private boolean refuseConnections;
     private Handshake handshake;
+    private boolean dropDuringWarmup;
     private ServiceClient client;
 
     private final ServiceClientCallback callback = new ServiceClientCallback() {
@@ -59,6 +61,7 @@ public class ServiceClientTest {
         scheduler.tasks.clear();
         refuseConnections = false;
         handshake = Handshake.COMPLETE;
+        dropDuringWarmup = false;
         registryAnswer = new ServiceInfo(ORDERS, List.of(FIRST, SECOND));
         client = new ServiceClient("orders", id -> {
             if (registryAnswer == null) {
@@ -186,6 +189,43 @@ public class ServiceClientTest {
         Assert.assertTrue(client.isClosed());
     }
 
+    @Test
+    public void warmsUpBeforeReportingTheConnection() {
+        client = warmingClient(5);
+        client.connect();
+
+        List<Message> warmups = opened.get(0).sent.stream().filter(ServiceWarmupMessage.class::isInstance).toList();
+        Assert.assertEquals(warmups.size(), 5);
+        Assert.assertEquals(events, List.of("connect 10.0.0.1"), "the warm-up answers never reach the application");
+        client.send(PING);
+        Assert.assertEquals(opened.get(0).sent.get(opened.get(0).sent.size() - 1), PING);
+    }
+
+    @Test
+    public void warmsUpAgainAfterReconnecting() {
+        client = warmingClient(3);
+        client.connect();
+        opened.get(0).drop();
+        scheduler.runPending();
+
+        Assert.assertEquals(opened.size(), 2);
+        Assert.assertEquals(opened.get(1).sent.stream().filter(ServiceWarmupMessage.class::isInstance).count(), 3);
+        Assert.assertTrue(client.isConnected());
+    }
+
+    @Test
+    public void aConnectionLostDuringWarmupFailsTheConnect() {
+        dropDuringWarmup = true;
+        client = warmingClient(5);
+        ServiceException e = Assert.expectThrows(ServiceException.class, client::connect);
+        Assert.assertTrue(e.getMessage().contains("closed the connection"), e.getMessage());
+        Assert.assertTrue(events.isEmpty(), "the application never saw a connection");
+    }
+
+    private ServiceClient warmingClient(int roundTrips) {
+        return new ServiceClient("orders", id -> registryAnswer, callback, this::open, scheduler, roundTrips);
+    }
+
     private void assertExpectedThrowsOnSend() {
         Assert.expectThrows(ServiceException.class, () -> client.send(PING));
     }
@@ -235,6 +275,14 @@ public class ServiceClientTest {
         @Override
         public void send(Message message) {
             sent.add(message);
+            // Stands in for a service running the SDK, which answers warm-up round trips
+            if (message instanceof ServiceWarmupMessage warmup && !warmup.isReply()) {
+                if (dropDuringWarmup && warmup.getSequence() == 2) {
+                    drop();
+                    return;
+                }
+                listener.onMessage(warmup.reply());
+            }
         }
 
         @Override

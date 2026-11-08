@@ -107,7 +107,7 @@ public final class ServiceManager {
                     definition.group(), definition.application(), group, application));
         }
         int port = portResolver.applyAsInt(definition);
-        Server server = serverFactory.create(port, callback);
+        Server server = serverFactory.create(port, new WarmupAnsweringCallback(callback));
         configure.accept(server);
         try {
             server.start();
@@ -172,9 +172,18 @@ public final class ServiceManager {
      */
     public ServiceClient connect(String serviceId, ServiceClientCallback callback,
             Consumer<ProtocolSettings> configure) {
+        return connect(serviceId, callback, ServiceClientOptions.defaults().withSettings(configure));
+    }
+
+    /**
+     * Looks up a service and connects to it with the given options, blocking until connected and warmed up.
+     *
+     * @throws ServiceException if the service is unknown, has no instance to connect to, or the connection fails
+     */
+    public ServiceClient connect(String serviceId, ServiceClientCallback callback, ServiceClientOptions options) {
         requireBlockingAllowed("connectToService");
         ServiceClient client = new ServiceClient(serviceId, this::lookup, callback,
-                new DataBridgeServiceConnector(configure));
+                new DataBridgeServiceConnector(options.getSettings()), options.getWarmupRoundTrips());
         client.connect();
         return client;
     }

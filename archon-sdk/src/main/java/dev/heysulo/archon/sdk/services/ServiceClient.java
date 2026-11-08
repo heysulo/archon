@@ -7,6 +7,9 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceWarmupMessage;
+
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -25,6 +28,9 @@ import java.util.function.Function;
 public final class ServiceClient implements AutoCloseable {
     static final long RECONNECT_DELAY_MILLIS = 1_000;
     private static final long HANDSHAKE_TIMEOUT_MILLIS = 5_000;
+    // A warm-up that has not finished by then is abandoned, and the connection is used as it is
+    private static final long WARMUP_TIMEOUT_MILLIS = 30_000;
+    private static final int WARMUP_SAMPLE = 1_000;
     private static final Logger LOGGER = LoggerFactory.getLogger(ServiceClient.class);
     private static final ScheduledExecutorService DEFAULT_SCHEDULER = Executors.newSingleThreadScheduledExecutor(
             new DefaultThreadFactory("archon-service-reconnect", true));
@@ -34,18 +40,25 @@ public final class ServiceClient implements AutoCloseable {
     private final ServiceClientCallback callback;
     private final ServiceConnection.Connector connector;
     private final ScheduledExecutorService scheduler;
+    private final int warmupRoundTrips;
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
     private final Object attemptLock = new Object();
     private volatile Attempt active;
     private volatile boolean closed;
 
     ServiceClient(String serviceId, Function<String, ServiceInfo> lookup, ServiceClientCallback callback,
-            ServiceConnection.Connector connector) {
-        this(serviceId, lookup, callback, connector, DEFAULT_SCHEDULER);
+            ServiceConnection.Connector connector, int warmupRoundTrips) {
+        this(serviceId, lookup, callback, connector, DEFAULT_SCHEDULER, warmupRoundTrips);
     }
 
     ServiceClient(String serviceId, Function<String, ServiceInfo> lookup, ServiceClientCallback callback,
             ServiceConnection.Connector connector, ScheduledExecutorService scheduler) {
+        this(serviceId, lookup, callback, connector, scheduler, 0);
+    }
+
+    ServiceClient(String serviceId, Function<String, ServiceInfo> lookup, ServiceClientCallback callback,
+            ServiceConnection.Connector connector, ScheduledExecutorService scheduler, int warmupRoundTrips) {
+        this.warmupRoundTrips = warmupRoundTrips;
         this.serviceId = serviceId;
         this.lookup = lookup;
         this.callback = callback;
@@ -54,7 +67,7 @@ public final class ServiceClient implements AutoCloseable {
     }
 
     /**
-     * Connects for the first time, blocking until the connection is ready.
+     * Connects for the first time, blocking until the connection is ready and warmed up.
      *
      * @throws ServiceException if the service is unknown, has no instance to connect to, or the connection fails.
      *                          A client that failed to connect does not retry.
@@ -117,6 +130,11 @@ public final class ServiceClient implements AutoCloseable {
                 if (!attempt.handshake.await(HANDSHAKE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
                     throw new ServiceException(String.format("Service %s at %s:%d did not complete the handshake",
                             serviceId, endpoint.host(), endpoint.port()));
+                }
+                if (!attempt.ready.await(WARMUP_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    LOGGER.warn("Warm-up of service {} at {}:{} did not finish in {} ms. Using the connection as it is",
+                            serviceId, endpoint.host(), endpoint.port(), WARMUP_TIMEOUT_MILLIS);
+                    attempt.becomeReady();
                 }
                 if (attempt.disconnected) {
                     throw new ServiceException(String.format("Service %s at %s:%d closed the connection", serviceId,
@@ -183,19 +201,26 @@ public final class ServiceClient implements AutoCloseable {
         }
     }
 
-    /** One connection attempt. Events from an attempt that has been replaced are ignored. */
+    /**
+     * One connection attempt: handshake, then the warm-up, then ready. Events from an attempt that has been replaced
+     * are ignored.
+     */
     private final class Attempt implements ServiceConnection.Listener {
         private final ServiceEndpoint endpoint;
         private final CountDownLatch handshake = new CountDownLatch(1);
+        private final CountDownLatch ready = new CountDownLatch(1);
+        private final AtomicBoolean becameReady = new AtomicBoolean(false);
+        private final long[] warmupSample = new long[WARMUP_SAMPLE];
         private volatile ServiceConnection connection;
         private volatile boolean disconnected;
+        private long warmupStartedNanos;
 
         Attempt(ServiceEndpoint endpoint) {
             this.endpoint = endpoint;
         }
 
         boolean isReady() {
-            return handshake.getCount() == 0 && !disconnected && connection != null && connection.isConnected();
+            return becameReady.get() && !disconnected && connection != null && connection.isConnected();
         }
 
         private boolean isActive() {
@@ -205,6 +230,46 @@ public final class ServiceClient implements AutoCloseable {
         @Override
         public void onConnect() {
             handshake.countDown();
+            if (warmupRoundTrips <= 0) {
+                becomeReady();
+                return;
+            }
+            warmupStartedNanos = System.nanoTime();
+            sendWarmup(1);
+        }
+
+        // Each round trip goes out on the network thread the moment the previous answer arrives
+        private void continueWarmup(ServiceWarmupMessage answer) {
+            long done = answer.getSequence();
+            warmupSample[(int) (done % WARMUP_SAMPLE)] = System.nanoTime() - answer.getSentAtNanos();
+            if (done < warmupRoundTrips) {
+                sendWarmup(done + 1);
+                return;
+            }
+            long[] sample = Arrays.copyOf(warmupSample, (int) Math.min(done, WARMUP_SAMPLE));
+            Arrays.sort(sample);
+            LOGGER.info("Warmed up service {} at {}:{} with {} round trips in {} ms. Last {}: median {} us",
+                    serviceId, endpoint.host(), endpoint.port(), warmupRoundTrips,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - warmupStartedNanos), sample.length,
+                    TimeUnit.NANOSECONDS.toMicros(sample[sample.length / 2]));
+            becomeReady();
+        }
+
+        private void sendWarmup(long sequence) {
+            try {
+                connection.send(new ServiceWarmupMessage(sequence, System.nanoTime(), false));
+            } catch (RuntimeException e) {
+                // The connection dropped; onDisconnect releases the waiting connect
+                LOGGER.debug("Warm-up of service {} stopped: {}", serviceId, e.getMessage());
+            }
+        }
+
+        /** Marks the connection usable and tells the application, once. */
+        void becomeReady() {
+            if (disconnected || !becameReady.compareAndSet(false, true)) {
+                return;
+            }
+            ready.countDown();
             if (isActive()) {
                 LOGGER.info("Connected to service {} at {}:{}", serviceId, endpoint.host(), endpoint.port());
                 callback.onConnect(ServiceClient.this, endpoint);
@@ -213,10 +278,11 @@ public final class ServiceClient implements AutoCloseable {
 
         @Override
         public void onDisconnect() {
-            boolean wasReady = handshake.getCount() == 0 && !disconnected;
+            boolean wasReady = becameReady.get() && !disconnected;
             disconnected = true;
-            // Releases a connect still waiting for the handshake
+            // Releases a connect still waiting for the handshake or the warm-up
             handshake.countDown();
+            ready.countDown();
             if (!isActive() || closed) {
                 return;
             }
@@ -229,6 +295,12 @@ public final class ServiceClient implements AutoCloseable {
 
         @Override
         public void onMessage(Message message) {
+            if (message instanceof ServiceWarmupMessage warmup) {
+                if (warmup.isReply() && !becameReady.get()) {
+                    continueWarmup(warmup);
+                }
+                return;
+            }
             if (isActive()) {
                 callback.onMessage(ServiceClient.this, message);
             }

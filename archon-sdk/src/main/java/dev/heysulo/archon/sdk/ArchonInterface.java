@@ -7,6 +7,7 @@ import dev.heysulo.archon.sdk.registry.PrimaryRegistry;
 import dev.heysulo.archon.sdk.registry.RegistryLookupService;
 import dev.heysulo.archon.sdk.services.ServiceClient;
 import dev.heysulo.archon.sdk.services.ServiceClientCallback;
+import dev.heysulo.archon.sdk.services.ServiceClientOptions;
 import dev.heysulo.archon.sdk.services.ServiceInfo;
 import dev.heysulo.archon.sdk.services.ServiceManager;
 import dev.heysulo.archon.sdk.utils.Utils;
@@ -253,6 +254,18 @@ public class ArchonInterface {
     public ServiceClient connectToService(String serviceId, ServiceClientCallback callback,
             Consumer<ProtocolSettings> configure) {
         return requireServices().connect(serviceId, callback, configure);
+    }
+
+    /**
+     * Connects to a service with the given options, for example a warm-up for services called rarely. Blocks until
+     * connected and warmed up.
+     *
+     * @throws dev.heysulo.archon.sdk.services.ServiceException if the service is unknown, has no instance to connect
+     *                                                          to, or the connection fails
+     */
+    public ServiceClient connectToService(String serviceId, ServiceClientCallback callback,
+            ServiceClientOptions options) {
+        return requireServices().connect(serviceId, callback, options);
     }
 
     public void stopService(String serviceId) {
