@@ -4,6 +4,8 @@ export const PERMISSIONS = {
   usersManage: "users:manage",
   configsView: "configs:view",
   configsManage: "configs:manage",
+  servicesView: "services:view",
+  servicesManage: "services:manage",
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

@@ -10,6 +10,7 @@ import dev.heysulo.archon.portal.auth.AuthService;
 import dev.heysulo.archon.portal.auth.PasswordHasher;
 import dev.heysulo.archon.portal.auth.Permission;
 import dev.heysulo.archon.portal.auth.TestDatabase;
+import dev.heysulo.archon.portal.services.ServiceStore;
 import dev.heysulo.archon.sdk.config.ConfigAdmin;
 import dev.heysulo.archon.sdk.config.ConfigReplica;
 import dev.heysulo.archon.sdk.config.ConfigurationException;
@@ -59,11 +60,19 @@ public class PortalServerTest {
             port = free.getLocalPort();
         }
         database = new TestDatabase();
-        database.addRole("viewer", Permission.PROCESSES_VIEW.key(), Permission.CONFIGS_VIEW.key());
+        database.addRole("viewer", Permission.PROCESSES_VIEW.key(), Permission.CONFIGS_VIEW.key(),
+                Permission.SERVICES_VIEW.key());
+        // The registries own this table; the portal only edits its rows
+        database.execute("CREATE TABLE services (id VARCHAR(128) PRIMARY KEY, name VARCHAR(255) NOT NULL, "
+                + "port_offset INT NOT NULL, app_group VARCHAR(128) NOT NULL, app_name VARCHAR(128) NOT NULL, "
+                + "mode VARCHAR(32) NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                + "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                + "CONSTRAINT uq_services_app_port UNIQUE (app_group, app_name, port_offset))");
         AuthService auth = new AuthService(database.store(), new PasswordHasher(1_000), Clock.systemUTC());
         auth.completeSetup(auth.createSetupToken().orElseThrow(), "admin", "Admin", ADMIN_PASSWORD);
         server = new PortalServer(feed, snapshot -> snapshot.servedBy(identity), "/portal-test", new AuthApi(auth),
-                new ConfigApi(configs, auth::authenticate), auth::authenticate);
+                new ConfigApi(configs, auth::authenticate),
+                new ServicesApi(new ServiceStore(database.dataSource()), feed, auth::authenticate), auth::authenticate);
         server.start(port);
         adminCookie = signIn("admin", ADMIN_PASSWORD);
     }
@@ -75,8 +84,11 @@ public class PortalServerTest {
     }
 
     @BeforeMethod
-    public void registryUp() {
+    public void registryUp() throws java.sql.SQLException {
         configs.clear();
+        database.execute("DELETE FROM services");
+        database.execute("INSERT INTO services (id, name, port_offset, app_group, app_name, mode) VALUES "
+                + "('archon-config', 'Archon configuration', 1, 'Archon', 'Config', 'PRIMARY_MIRROR')");
         configs.failure = null;
         configs.synced = true;
         feed.snapshot = ProcessSnapshot.of("10.21.3.202", 3, List.of(LEADER, STOPPED));
@@ -252,6 +264,96 @@ public class PortalServerTest {
         Assert.assertEquals(get("/api/configs?limit=lots", adminCookie).statusCode(), 400);
         Assert.assertTrue(get("/api/configs?limit=100000", adminCookie).body().contains("\"limit\":200"),
                 "pages are capped");
+    }
+
+    // ---------------- services ----------------
+
+    @Test
+    public void managesServices() throws Exception {
+        String reports = "{\"id\":\" reports \",\"name\":\"Reports\",\"portOffset\":0,\"group\":\"Group\","
+                + "\"application\":\"Application\",\"mode\":\"PRIMARY_MIRROR\"}";
+        HttpResponse<String> created = post("/api/services", reports, adminCookie, true);
+        Assert.assertEquals(created.statusCode(), 201, created.body());
+        Assert.assertTrue(created.body().contains("\"id\":\"reports\""), "trimmed: " + created.body());
+        Assert.assertEquals(post("/api/services", reports, adminCookie, true).statusCode(), 409, "same id");
+
+        HttpResponse<String> listed = get("/api/services", adminCookie);
+        Assert.assertTrue(listed.body().contains("\"id\":\"archon-config\""), listed.body());
+        Assert.assertTrue(listed.body().contains("\"managedByArchon\":true"), listed.body());
+
+        HttpResponse<String> updated = send("PUT", "/api/services/reports", reports.replace("\"portOffset\":0",
+                "\"portOffset\":4").replace("PRIMARY_MIRROR", "LOAD_BALANCE"), adminCookie);
+        Assert.assertEquals(updated.statusCode(), 200, updated.body());
+        Assert.assertTrue(updated.body().contains("\"portOffset\":4"), updated.body());
+        Assert.assertTrue(updated.body().contains("\"mode\":\"LOAD_BALANCE\""), updated.body());
+
+        Assert.assertEquals(send("DELETE", "/api/services/reports", null, adminCookie).statusCode(), 204);
+        Assert.assertEquals(send("DELETE", "/api/services/reports", null, adminCookie).statusCode(), 404);
+    }
+
+    @Test
+    public void refusesInvalidAndClashingServices() throws Exception {
+        String base = "{\"id\":\"search\",\"name\":\"Search\",\"portOffset\":2,\"group\":\"Shop\","
+                + "\"application\":\"Search\",\"mode\":\"LOAD_BALANCE\"}";
+        Assert.assertEquals(post("/api/services", base, adminCookie, true).statusCode(), 201);
+        HttpResponse<String> clash = post("/api/services", base.replace("\"search\"", "\"index\""), adminCookie,
+                true);
+        Assert.assertEquals(clash.statusCode(), 409, "same application and offset");
+        Assert.assertTrue(clash.body().contains("already serves search"), clash.body());
+        Assert.assertEquals(post("/api/services", base.replace("search\",\"name", "has space\",\"name"),
+                adminCookie, true).statusCode(), 400);
+        Assert.assertEquals(post("/api/services", base.replace("\"portOffset\":2", "\"portOffset\":70000"),
+                adminCookie, true).statusCode(), 400);
+        Assert.assertEquals(post("/api/services", base.replace("LOAD_BALANCE", "SOMETIMES"), adminCookie, true)
+                .statusCode(), 400);
+        Assert.assertEquals(post("/api/services", base.replace(",\"portOffset\":2", ""), adminCookie, true)
+                .statusCode(), 400);
+    }
+
+    // LEADER serves ping. Changing it would leave the instance on the old port or owner.
+    @Test
+    public void refusesChangesToRunningServices() throws Exception {
+        String ping = "{\"id\":\"ping\",\"name\":\"Ping\",\"portOffset\":1,\"group\":\"Group\","
+                + "\"application\":\"Application\",\"mode\":\"PRIMARY_MIRROR\"}";
+        Assert.assertEquals(post("/api/services", ping, adminCookie, true).statusCode(), 201, "adding is fine");
+
+        HttpResponse<String> changed = send("PUT", "/api/services/ping", ping.replace("\"portOffset\":1",
+                "\"portOffset\":2"), adminCookie);
+        Assert.assertEquals(changed.statusCode(), 409, changed.body());
+        Assert.assertTrue(changed.body().contains("running on Group / Application #1"), changed.body());
+        Assert.assertEquals(send("DELETE", "/api/services/ping", null, adminCookie).statusCode(), 409);
+
+        // Nobody can say whether it runs while no registry answers
+        feed.snapshot = null;
+        Assert.assertEquals(send("DELETE", "/api/services/ping", null, adminCookie).statusCode(), 503);
+
+        feed.snapshot = ProcessSnapshot.of("10.21.3.202", 3, List.of(STOPPED));
+        Assert.assertEquals(send("DELETE", "/api/services/ping", null, adminCookie).statusCode(), 204,
+                "stopped, so it can go");
+    }
+
+    // Removing archon-config would stop every application receiving configurations
+    @Test
+    public void refusesChangesToArchonsOwnServices() throws Exception {
+        String archon = "{\"id\":\"archon-config\",\"name\":\"Archon configuration\",\"portOffset\":7,"
+                + "\"group\":\"Archon\",\"application\":\"Config\",\"mode\":\"PRIMARY_MIRROR\"}";
+        Assert.assertEquals(send("PUT", "/api/services/archon-config", archon, adminCookie).statusCode(), 400);
+        Assert.assertEquals(send("DELETE", "/api/services/archon-config", null, adminCookie).statusCode(), 400);
+        Assert.assertEquals(post("/api/services", archon.replace("archon-config", "archon-extra"), adminCookie,
+                true).statusCode(), 400);
+        Assert.assertTrue(get("/api/services", adminCookie).body().contains("\"portOffset\":1"));
+    }
+
+    @Test
+    public void letsViewersSeeButNotChangeServices() throws Exception {
+        Assert.assertEquals(post("/api/users", "{\"username\":\"sam\",\"displayName\":\"Sam\","
+                + "\"password\":\"sams long password\",\"roles\":[\"viewer\"]}", adminCookie, true).statusCode(),
+                201);
+        String sam = signIn("sam", "sams long password");
+        Assert.assertEquals(get("/api/services", sam).statusCode(), 200);
+        Assert.assertEquals(send("DELETE", "/api/services/anything", null, sam).statusCode(), 403);
+        Assert.assertEquals(get("/api/services", null).statusCode(), 401);
+        Assert.assertEquals(post("/api/services", "{}", adminCookie, false).statusCode(), 403, "other sites");
     }
 
     // ---------------- processes ----------------

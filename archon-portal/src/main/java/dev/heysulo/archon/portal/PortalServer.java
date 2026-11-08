@@ -33,6 +33,7 @@ import java.util.function.UnaryOperator;
  *     or an {@code offline} event while no primary registry answers</li>
  *     <li>{@code GET /api/processes} the latest process list as JSON, or 503 with an error</li>
  *     <li>{@code /api/auth/...}, {@code /api/users...} and {@code /api/roles}, see {@link AuthApi}</li>
+ *     <li>{@code /api/configs...}, see {@link ConfigApi}, and {@code /api/services...}, see {@link ServicesApi}</li>
  *     <li>{@code GET /healthz} 200 while the portal is up, whatever the registries are doing</li>
  * </ul>
  * The frontend's files are public; every API that returns data needs a signed-in user with the right permission.
@@ -54,6 +55,7 @@ final class PortalServer implements ProcessFeed.Listener {
     private final StaticAssets assets;
     private final AuthApi authApi;
     private final ConfigApi configApi;
+    private final ServicesApi servicesApi;
     private final Function<String, Optional<Principal>> sessions;
     private final Set<Stream> streams = ConcurrentHashMap.newKeySet();
     // Writes to browsers block, so they never run on the thread that hears from the registry
@@ -68,8 +70,9 @@ final class PortalServer implements ProcessFeed.Listener {
      * @param sessions  finds who a session token belongs to
      */
     PortalServer(ProcessFeed feed, UnaryOperator<ProcessSnapshot> stamp, String assetRoot, AuthApi authApi,
-            ConfigApi configApi, Function<String, Optional<Principal>> sessions) {
+            ConfigApi configApi, ServicesApi servicesApi, Function<String, Optional<Principal>> sessions) {
         this.configApi = configApi;
+        this.servicesApi = servicesApi;
         this.feed = feed;
         this.stamp = stamp;
         this.assets = new StaticAssets(assetRoot);
@@ -88,6 +91,7 @@ final class PortalServer implements ProcessFeed.Listener {
         server.createContext("/api/users", authApi::handleUsers);
         server.createContext("/api/roles", authApi::handleRoles);
         server.createContext("/api/configs", configApi::handle);
+        server.createContext("/api/services", servicesApi::handle);
         server.createContext("/healthz", exchange -> Http.sendText(exchange, 200, "ok"));
         server.createContext("/", this::frontend);
         executor = Executors.newFixedThreadPool(THREADS);

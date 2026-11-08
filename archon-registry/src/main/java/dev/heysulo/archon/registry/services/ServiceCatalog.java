@@ -18,8 +18,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The services the registry knows about, loaded once at startup from the {@code services} table of the archon
- * schema. Every registry reads the same table, so a promoted mirror serves the same definitions.
+ * The services the registry knows about, from the {@code services} table of the archon schema: loaded at startup,
+ * then read again now and then by {@link ServiceCatalogWatcher}. Every registry reads the same table, so a promoted
+ * mirror serves the same definitions.
  */
 public final class ServiceCatalog {
     static final String QUERY = "SELECT id, name, port_offset, app_group, app_name, mode FROM services ORDER BY id";
@@ -53,7 +54,7 @@ public final class ServiceCatalog {
         return load(database.get());
     }
 
-    static ServiceCatalog load(Database database) throws InterruptedException {
+    public static ServiceCatalog load(Database database) throws InterruptedException {
         SQLException lastFailure = null;
         for (int attempt = 1; attempt <= LOAD_ATTEMPTS; attempt++) {
             try (Connection connection = database.connect()) {

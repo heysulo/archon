@@ -11,8 +11,8 @@ CREATE DATABASE IF NOT EXISTS archon CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 USE archon;
 
--- Services applications can start and look up. Registries read this table when they start, so changes take
--- effect after the registries restart.
+-- Services applications can start and look up. Registries read this table when they start and again every 10
+-- seconds, so changes, such as those made in the portal, take effect without a restart.
 CREATE TABLE IF NOT EXISTS services (
     -- What applications start and look the service up by. Case sensitive.
     id          VARCHAR(128)                            NOT NULL,

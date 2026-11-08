@@ -26,6 +26,18 @@ public final class TestDatabase implements AutoCloseable {
         return new AuthStore(database.dataSource());
     }
 
+    /** Runs a statement, such as creating a table another component owns. */
+    public void execute(String sql) throws SQLException {
+        try (Connection connection = database.dataSource().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
+    }
+
+    public javax.sql.DataSource dataSource() {
+        return database.dataSource();
+    }
+
     /** Adds a role, as an admin will through a future role editor. */
     public void addRole(String id, String... permissions) throws SQLException {
         try (Connection connection = database.dataSource().getConnection();

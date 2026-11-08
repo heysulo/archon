@@ -53,6 +53,10 @@ public final class ServiceRegistry {
         this.catalog = catalog;
     }
 
+    public ServiceCatalog catalog() {
+        return catalog;
+    }
+
     public ServiceLookupResponseMessage lookup(ServiceLookupMessage request) {
         Optional<ServiceDefinition> definition = catalog.find(request.getServiceId());
         List<ServiceEndpoint> endpoints = definition.map(this::endpointsOf).orElse(List.of());

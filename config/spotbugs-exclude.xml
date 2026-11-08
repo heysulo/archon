@@ -29,6 +29,7 @@
         <Or>
             <Class name="dev.heysulo.archon.portal.auth.AuthService"/>
             <Class name="dev.heysulo.archon.portal.auth.AuthStore"/>
+            <Class name="dev.heysulo.archon.portal.services.ServiceStore"/>
         </Or>
         <Method name="&lt;init&gt;"/>
     </Match>

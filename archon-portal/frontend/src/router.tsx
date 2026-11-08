@@ -7,6 +7,7 @@ import { SetupPage } from "./pages/auth/SetupPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProcessesPage } from "./pages/processes/ProcessesPage";
 import { ConfigsPage } from "./pages/configs/ConfigsPage";
+import { ServicesPage } from "./pages/services/ServicesPage";
 import { UsersPage } from "./pages/users/UsersPage";
 
 export const routes: RouteObject[] = [
@@ -26,6 +27,14 @@ export const routes: RouteObject[] = [
             element: (
               <RequirePermission permission={PERMISSIONS.processesView}>
                 <ProcessesPage />
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "services",
+            element: (
+              <RequirePermission permission={PERMISSIONS.servicesView}>
+                <ServicesPage />
               </RequirePermission>
             ),
           },
