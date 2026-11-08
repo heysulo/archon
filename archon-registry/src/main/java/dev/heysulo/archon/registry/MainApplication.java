@@ -8,7 +8,20 @@ import dev.heysulo.archon.registry.services.ServiceRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Locale;
+
 public class MainApplication {
+    static final String LOG_LEVEL_ENV = "ARCHON_LOG_LEVEL";
+    private static final String SIMPLE_LOGGER_LEVEL = "org.slf4j.simpleLogger.defaultLogLevel";
+
+    // Runs before the first logger is created, which is when slf4j-simple reads its level
+    static {
+        String level = System.getenv(LOG_LEVEL_ENV);
+        if (level != null && !level.isBlank() && System.getProperty(SIMPLE_LOGGER_LEVEL) == null) {
+            System.setProperty(SIMPLE_LOGGER_LEVEL, level.trim().toLowerCase(Locale.ROOT));
+        }
+    }
+
     private static final Logger LOGGER = LoggerFactory.getLogger(MainApplication.class);
 
     public static void main(String[] args) throws InterruptedException {

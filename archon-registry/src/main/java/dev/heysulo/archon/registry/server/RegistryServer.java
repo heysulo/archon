@@ -84,18 +84,19 @@ public class RegistryServer implements ServerCallback {
 
     @Override
     public void onConnect(Server server, Connection connection) {
-        LOGGER.info("Client connected to registry server. IP:{}", connection.getRemoteAddress());
+        // Lookups open a short-lived connection each, so these are routine. Disconnects that matter are logged by the
+        // application or registry the connection belonged to.
+        LOGGER.debug("Client connected from {}", connection.getRemoteAddress());
     }
 
     @Override
     public void onDisconnect(Server server, Connection connection) {
-        LOGGER.info("Registry Server Client disconnected from {}", connection.getRemoteAddress());
+        LOGGER.debug("Client disconnected from {}", connection.getRemoteAddress());
     }
 
     @Override
     public void onMessage(Server server, Connection connection, Message message) {
-        LOGGER.info("Received message from {} type {}", connection.getRemoteAddress(),
-                message.getClass().getSimpleName());
+        LOGGER.debug("Received {} from {}", message.getClass().getSimpleName(), connection.getRemoteAddress());
         if (message instanceof VoteRequest voteRequest) {
             handleVoteRequest(connection, voteRequest);
             return;
@@ -106,7 +107,6 @@ public class RegistryServer implements ServerCallback {
             handleLeaderElectionMessage(connection, (LeaderElectionMessage) message);
             return;
         } else if (message instanceof PrimaryRegistryLookupMessage) {
-            LOGGER.info("Received PrimaryRegistryLookupMessage from {}", connection.getRemoteAddress());
             PrimaryRegistryLookupResponseMessage response = new PrimaryRegistryLookupResponseMessage(getRank());
             response.setTerm(getTerm());
             connection.send(response);

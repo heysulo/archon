@@ -48,6 +48,7 @@ public class LeaderElectorClient implements ClientCallback {
     private final ExecutorService connector =
             Executors.newCachedThreadPool(new DefaultThreadFactory("leader-elector-connector", true));
     private final Set<String> connecting = ConcurrentHashMap.newKeySet();
+    private final Set<String> unreachable = ConcurrentHashMap.newKeySet();
     private final Map<Client, LeaderStatusMessage> peerStatus = new ConcurrentHashMap<>();
     private final Map<Client, VoteResponse> votes = new ConcurrentHashMap<>();
     private final Ballot ballot = new Ballot(REGISTRY_VOTE_LEASE, () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
@@ -106,7 +107,8 @@ public class LeaderElectorClient implements ClientCallback {
     }
 
     private void handleLeaderStatusMessage(Client client, LeaderStatusMessage leaderStatusMessage) {
-        LOGGER.info("Received status from {}. Rank: {}, term: {}", client.getRemoteAddress(),
+        // Polled every half second during an election
+        LOGGER.debug("Received status from {}. Rank: {}, term: {}", client.getRemoteAddress(),
                 leaderStatusMessage.getRank(), leaderStatusMessage.getTerm());
         RegistryServer.observeTerm(leaderStatusMessage.getTerm());
         if (leaderStatusMessage.getRank() == RANK_PRIMARY) {
@@ -265,7 +267,7 @@ public class LeaderElectorClient implements ClientCallback {
         try {
             client.send(message);
         } catch (RuntimeException e) {
-            LOGGER.info("Could not reach registry at {}: {}", client.getRemoteAddress(), e.getMessage());
+            LOGGER.debug("Could not reach registry at {}: {}", client.getRemoteAddress(), e.getMessage());
         }
     }
 
@@ -331,15 +333,23 @@ public class LeaderElectorClient implements ClientCallback {
     }
 
     private void tryConnect(String address) {
-        LOGGER.info("Attempting to connect to {} for leader election", address);
+        LOGGER.debug("Attempting to connect to {} for leader election", address);
         Client client = new Client(address, Constants.REGISTRY_PORT, this, workerGroup);
         Constants.TRUSTED_TIME_CLASSES.forEach(client.settings()::addTrustedPackage);
         client.settings().setHeartbeatInterval(Constants.REGISTRY_HEARTBEAT_INTERVAL);
         try {
             client.connect();
             peers.put(address, client);
+            if (unreachable.remove(address)) {
+                LOGGER.info("Registry at {} is reachable again", address);
+            }
         } catch (Exception e) {
-            LOGGER.info("Connection to registry at {} failed. Error: {}", address, e.getMessage());
+            // Retried every half second while a peer is down, so only the first failure is worth reading
+            if (unreachable.add(address)) {
+                LOGGER.info("Cannot reach registry at {}: {}. Retrying quietly", address, e.getMessage());
+            } else {
+                LOGGER.debug("Still cannot reach registry at {}: {}", address, e.getMessage());
+            }
         }
     }
 }

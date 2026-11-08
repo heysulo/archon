@@ -141,8 +141,7 @@ public class Application implements ConnectionCallback {
 
     @Override
     public void onMessage(Connection connection, Message message) {
-        LOGGER.info("Received message from {} type {}", connection.getRemoteAddress(),
-                message.getClass().getSimpleName());
+        LOGGER.debug("Received {} from {}", message.getClass().getSimpleName(), getDisplayName());
         if (message instanceof ApplicationRankUpdate rankUpdate) {
             handleApplicationRankUpdate(rankUpdate);
         }
@@ -264,7 +263,7 @@ public class Application implements ConnectionCallback {
         }
         ApplicationSyncMessage message = new ApplicationSyncMessage(this);
         registryServer.getActiveMirrorApplications().forEach(app -> {
-            LOGGER.info("Syncing {} with {}", getDisplayName(), app.getDisplayName());
+            LOGGER.debug("Syncing {} with {}", getDisplayName(), app.getDisplayName());
             app.send(message);
         });
     }
