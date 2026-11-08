@@ -1,0 +1,20 @@
+# Services the registry knows about. Every registry mounts the same file, so a promoted mirror serves the same
+# definitions. Ports are offsets from each starting instance's ARCHON_BASE_PORT.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: archon-services
+data:
+  services.json: |
+    {
+      "services": [
+        {
+          "id": "ping",
+          "name": "Ping Service",
+          "portOffset": 1,
+          "group": "Group",
+          "application": "Application",
+          "mode": "PRIMARY_MIRROR"
+        }
+      ]
+    }

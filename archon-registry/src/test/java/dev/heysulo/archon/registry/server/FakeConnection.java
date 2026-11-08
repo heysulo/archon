@@ -12,22 +12,22 @@ import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /** Records what the registry sends, and lets a test drop the connection. */
-final class FakeConnection implements Connection {
+public final class FakeConnection implements Connection {
     private final List<Message> sent = new CopyOnWriteArrayList<>();
     private volatile boolean connected = true;
     private volatile ConnectionCallback callback;
 
-    void drop() {
+    public void drop() {
         connected = false;
         callback.onDisconnect(this);
     }
 
-    String termination() {
+    public String termination() {
         ApplicationTerminationMessage message = last(ApplicationTerminationMessage.class);
         return message == null ? null : message.getReason();
     }
 
-    <T extends Message> T last(Class<T> type) {
+    public <T extends Message> T last(Class<T> type) {
         return sent.stream().filter(type::isInstance).map(type::cast).reduce((a, b) -> b).orElse(null);
     }
 

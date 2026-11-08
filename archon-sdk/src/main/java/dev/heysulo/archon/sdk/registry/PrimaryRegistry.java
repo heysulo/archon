@@ -4,6 +4,8 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationResponseMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationTerminationMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.AuthenticatedMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceStartResponseMessage;
 import dev.heysulo.archon.sdk.ArchonInterface;
 import dev.heysulo.archon.sdk.constant.RegistryConstants;
 import dev.heysulo.archon.sdk.exception.PrimaryRegistryConnectionFailure;
@@ -80,6 +82,8 @@ public class PrimaryRegistry implements ClientCallback {
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
         } else if (message instanceof ApplicationRankUpdate rankUpdateMessage) {
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
+        } else if (message instanceof ServiceLookupResponseMessage || message instanceof ServiceStartResponseMessage) {
+            archonInterface.onServiceResponse(message);
         } else if (message instanceof ApplicationTerminationMessage terminationMessage) {
             LOGGER.error("Received termination message from primary registry. Reason: {}",
                     terminationMessage.getReason());

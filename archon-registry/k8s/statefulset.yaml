@@ -26,6 +26,8 @@ spec:
               fieldPath: metadata.name
         - name: ARCHON_REGISTRY_LOCATIONS
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
+        - name: ARCHON_SERVICES_FILE
+          value: /etc/archon/services.json
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -37,3 +39,11 @@ spec:
         ports:
         - containerPort: 8080
           name: web
+        volumeMounts:
+        - name: services
+          mountPath: /etc/archon
+          readOnly: true
+      volumes:
+      - name: services
+        configMap:
+          name: archon-services

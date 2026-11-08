@@ -4,10 +4,14 @@ import dev.heysulo.archon.dictionary.sdk.enums.ProcessState;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceStartedMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceStoppedMessage;
 import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
 import dev.heysulo.archon.registry.server.RegistryServer;
+import dev.heysulo.archon.registry.services.ServiceRegistry;
 import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.ConnectionCallback;
 import dev.heysulo.databridge.core.common.Message;
@@ -122,7 +126,12 @@ public class Application implements ConnectionCallback {
     @Override
     public void onDisconnect(Connection connection) {
         ApplicationManager.withNamespaceLock(group, name, () -> {
+            if (connection != this.connection) {
+                // The instance already re-registered on a new connection, which still holds its rank and services
+                return;
+            }
             LOGGER.warn("{} disconnected from registry server.", this.getDisplayName());
+            ServiceRegistry.getInstance().forget(this);
             setRunLevel(RunLevel.KILLED);
             if (rank == RANK_PRIMARY) {
                 ApplicationManager.getInstance().electLeader(group, name);
@@ -139,6 +148,20 @@ public class Application implements ConnectionCallback {
         }
         if (message instanceof ApplicationSyncMessage applicationSyncMessage) {
             handleApplicationSyncMessage(applicationSyncMessage);
+        }
+        if (RegistryServer.getRank() == RANK_PRIMARY) {
+            handleServiceMessage(message);
+        }
+    }
+
+    private void handleServiceMessage(Message message) {
+        ServiceRegistry services = ServiceRegistry.getInstance();
+        if (message instanceof ServiceLookupMessage lookup) {
+            send(services.lookup(lookup));
+        } else if (message instanceof ServiceStartedMessage started) {
+            send(services.start(this, started));
+        } else if (message instanceof ServiceStoppedMessage stopped) {
+            services.stop(this, stopped);
         }
     }
 

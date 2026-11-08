@@ -5,11 +5,20 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage
 import dev.heysulo.archon.sdk.exception.PrimaryRegistryCommunicationFailure;
 import dev.heysulo.archon.sdk.registry.PrimaryRegistry;
 import dev.heysulo.archon.sdk.registry.RegistryLookupService;
+import dev.heysulo.archon.sdk.services.ServiceClient;
+import dev.heysulo.archon.sdk.services.ServiceClientCallback;
+import dev.heysulo.archon.sdk.services.ServiceInfo;
+import dev.heysulo.archon.sdk.services.ServiceManager;
 import dev.heysulo.archon.sdk.utils.Utils;
+import dev.heysulo.databridge.core.common.Message;
+import dev.heysulo.databridge.core.common.ProtocolSettings;
+import dev.heysulo.databridge.core.server.Server;
+import dev.heysulo.databridge.core.server.callback.ServerCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 import static dev.heysulo.archon.dictionary.sdk.RegistryProtocol.RANK_UNKNOWN;
 
@@ -27,6 +36,7 @@ public class ArchonInterface {
     private String groupName;
     private String applicationName;
     private ArchonCallback callback;
+    private volatile ServiceManager services;
 
     private ArchonInterface() {
     }
@@ -43,6 +53,7 @@ public class ArchonInterface {
         this.groupName = groupName;
         this.applicationName = applicationName;
         this.callback = callback;
+        this.services = new ServiceManager(groupName, applicationName, message -> primaryRegistry.sendMessage(message));
         setupPrimaryRegistryConnection();
         registerApplication();
         return rank;
@@ -70,6 +81,7 @@ public class ArchonInterface {
         LOGGER.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
         primaryRegistry.connect(primaryRegistryLocation);
         primaryRegistry.sendMessage(createRegistrationMessage(rank));
+        services.announceAll();
     }
 
     /**
@@ -114,8 +126,14 @@ public class ArchonInterface {
     }
 
     private ApplicationRegistrationMessage createRegistrationMessage(int requestedRank) {
+        return registrationMessage(groupName, applicationName, requestedRank);
+    }
+
+    // The message takes the application name first
+    static ApplicationRegistrationMessage registrationMessage(String groupName, String applicationName,
+            int requestedRank) {
         ApplicationRegistrationMessage message =
-                new ApplicationRegistrationMessage(groupName, applicationName, IP_ADDRESS_PLACEHOLDER);
+                new ApplicationRegistrationMessage(applicationName, groupName, IP_ADDRESS_PLACEHOLDER);
         message.setRank(requestedRank);
         return message;
     }
@@ -129,6 +147,69 @@ public class ArchonInterface {
 
     public void acknowledgeRank(int rank) {
         primaryRegistry.sendMessage(new ApplicationRankUpdate(rank));
+    }
+
+    /**
+     * Looks up a service's definition and where it is running. Blocks until the registry answers.
+     *
+     * @throws dev.heysulo.archon.sdk.services.ServiceException if the service is unknown or the registry does not
+     *                                                          answer
+     */
+    public ServiceInfo lookupService(String serviceId) {
+        return requireServices().lookup(serviceId);
+    }
+
+    /**
+     * Starts serving a service, on this instance's base port ({@code ARCHON_BASE_PORT}) plus the service's offset.
+     * Only instances of the service's application definition may start it, whatever their rank.
+     *
+     * @throws dev.heysulo.archon.sdk.services.ServiceException if the service cannot be started
+     */
+    public Server createService(String serviceId, ServerCallback callback) {
+        return createService(serviceId, callback, server -> { });
+    }
+
+    /**
+     * @param configure adjusts the server, for example its trusted packages, before it starts listening
+     */
+    public Server createService(String serviceId, ServerCallback callback, Consumer<Server> configure) {
+        return requireServices().start(serviceId, callback, configure);
+    }
+
+    /**
+     * Looks up a service and connects to it: to its primary, or to a random instance when load balanced. If the
+     * connection drops, the client looks the service up again and reconnects. Blocks until connected.
+     *
+     * @throws dev.heysulo.archon.sdk.services.ServiceException if the service is unknown, has no instance to connect
+     *                                                          to, or the connection fails
+     */
+    public ServiceClient connectToService(String serviceId, ServiceClientCallback callback) {
+        return connectToService(serviceId, callback, settings -> { });
+    }
+
+    /**
+     * @param configure adjusts each connection's settings, for example trusted packages, before it connects
+     */
+    public ServiceClient connectToService(String serviceId, ServiceClientCallback callback,
+            Consumer<ProtocolSettings> configure) {
+        return requireServices().connect(serviceId, callback, configure);
+    }
+
+    public void stopService(String serviceId) {
+        requireServices().stop(serviceId);
+    }
+
+    public void onServiceResponse(Message message) {
+        if (services != null) {
+            services.onResponse(message);
+        }
+    }
+
+    private ServiceManager requireServices() {
+        if (services == null) {
+            throw new IllegalStateException("ArchonInterface is not initialized");
+        }
+        return services;
     }
 
 }

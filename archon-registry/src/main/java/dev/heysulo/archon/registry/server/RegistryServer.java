@@ -5,6 +5,7 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationTerminationMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
 import dev.heysulo.archon.registry.applications.ApplicationManager;
@@ -19,6 +20,7 @@ import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationR
 import dev.heysulo.archon.registry.messages.leaderelection.VoteRequest;
 import dev.heysulo.archon.registry.messages.leaderelection.VoteResponse;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
+import dev.heysulo.archon.registry.services.ServiceRegistry;
 import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.Message;
 import dev.heysulo.databridge.core.server.BasicServer;
@@ -120,6 +122,9 @@ public class RegistryServer implements ServerCallback {
         // Handled as Primary
         if (message instanceof ApplicationRegistrationMessage registrationMessage) {
             handleApplicationRegistrationMessage(connection, registrationMessage);
+        } else if (message instanceof ServiceLookupMessage lookup) {
+            // Lookups need no registration, so tools and unregistered clients can find services too
+            connection.send(ServiceRegistry.getInstance().lookup(lookup));
         } else {
             LOGGER.warn("Dropping message from {} type {}. Unhandled", connection.getRemoteAddress(),
                     message.getClass().getSimpleName());
