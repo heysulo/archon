@@ -147,19 +147,16 @@ public final class ServiceStore {
         return trimmed;
     }
 
-    // Two services of one application on the same offset would bind the same port on every instance
+    // Each port offset belongs to one service, across every application, so a port names exactly one service
     private static void refuseSharedPort(Connection connection, ServiceRecord service) throws SQLException {
-        try (PreparedStatement select = connection.prepareStatement("SELECT id FROM services WHERE app_group = ? "
-                + "AND app_name = ? AND port_offset = ? AND id <> ?")) {
-            select.setString(1, service.group());
-            select.setString(2, service.application());
-            select.setInt(3, service.portOffset());
-            select.setString(4, service.id());
+        try (PreparedStatement select = connection.prepareStatement("SELECT id FROM services WHERE port_offset = ? "
+                + "AND id <> ?")) {
+            select.setInt(1, service.portOffset());
+            select.setString(2, service.id());
             try (ResultSet result = select.executeQuery()) {
                 if (result.next()) {
-                    throw new AuthException(409, service.group() + " / " + service.application()
-                            + " already serves " + result.getString("id") + " on port offset "
-                            + service.portOffset());
+                    throw new AuthException(409, "Port offset " + service.portOffset() + " is taken by "
+                            + result.getString("id"));
                 }
             }
         }

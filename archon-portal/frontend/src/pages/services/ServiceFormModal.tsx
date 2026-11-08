@@ -1,7 +1,8 @@
 import { Alert, Button, Group, Modal, NumberInput, SegmentedControl, Stack, Text, TextInput } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useState } from "react";
-import { identifierError, MAX_PORT_OFFSET, MODE_DESCRIPTIONS, MODE_LABELS } from "./model";
+import { firstFreeOffset, identifierError, MAX_PORT_OFFSET, MODE_DESCRIPTIONS, MODE_LABELS, offsetError }
+  from "./model";
 import type { Service, ServiceInput, ServiceMode } from "./servicesApi";
 
 const MONOSPACE = { input: { fontFamily: "var(--mantine-font-family-monospace)" } };
@@ -10,15 +11,17 @@ interface Props {
   opened: boolean;
   /** The service being edited, or null to add one. */
   service: Service | null;
+  /** Which service holds each port offset. */
+  taken: Map<number, string>;
   onClose: () => void;
   onSubmit: (input: ServiceInput) => Promise<void>;
 }
 
-export function ServiceFormModal({ opened, service, onClose, onSubmit }: Props) {
+export function ServiceFormModal({ opened, service, taken, onClose, onSubmit }: Props) {
   return (
     <Modal opened={opened} onClose={onClose} size="lg" title={service ? `Edit ${service.id}` : "Add service"}>
       {/* Mounted afresh each time, so the form starts from the service being edited */}
-      <ServiceForm key={service?.id ?? "new"} service={service} onClose={onClose} onSubmit={onSubmit} />
+      <ServiceForm key={service?.id ?? "new"} service={service} taken={taken} onClose={onClose} onSubmit={onSubmit} />
     </Modal>
   );
 }
@@ -27,7 +30,7 @@ interface FormValues extends Omit<ServiceInput, "portOffset"> {
   portOffset: number | string;
 }
 
-function ServiceForm({ service, onClose, onSubmit }: Omit<Props, "opened">) {
+function ServiceForm({ service, taken, onClose, onSubmit }: Omit<Props, "opened">) {
   const creating = service === null;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,7 +38,7 @@ function ServiceForm({ service, onClose, onSubmit }: Omit<Props, "opened">) {
     initialValues: {
       id: service?.id ?? "",
       name: service?.name ?? "",
-      portOffset: service?.portOffset ?? 0,
+      portOffset: service?.portOffset ?? firstFreeOffset(taken),
       group: service?.group ?? "",
       application: service?.application ?? "",
       mode: service?.mode ?? "PRIMARY_MIRROR",
@@ -45,10 +48,7 @@ function ServiceForm({ service, onClose, onSubmit }: Omit<Props, "opened">) {
       name: (value) => (value.trim() ? null : "Give the service a name"),
       group: identifierError,
       application: identifierError,
-      portOffset: (value) =>
-        typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_PORT_OFFSET
-          ? null
-          : `A whole number from 0 to ${MAX_PORT_OFFSET}`,
+      portOffset: (value) => offsetError(value, taken, service?.id ?? null),
     },
   });
   const { mode } = form.getValues();
@@ -96,7 +96,8 @@ function ServiceForm({ service, onClose, onSubmit }: Omit<Props, "opened">) {
           <TextInput label="Application" placeholder="Application" {...form.getInputProps("application")} />
         </Group>
         <NumberInput label="Port offset" min={0} max={MAX_PORT_OFFSET} allowDecimal={false} allowNegative={false}
-                     description="Added to each instance's ARCHON_BASE_PORT to give the port it serves on"
+                     description="Added to each instance's ARCHON_BASE_PORT to give the port it serves on. Each service
+                       needs its own."
                      {...form.getInputProps("portOffset")} />
         <div>
           <Text size="sm" fw={500} mb={4}>

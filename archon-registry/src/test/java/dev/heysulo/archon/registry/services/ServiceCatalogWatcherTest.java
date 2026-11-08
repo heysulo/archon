@@ -61,6 +61,15 @@ public class ServiceCatalogWatcherTest {
         Assert.assertEquals(registry.catalog().size(), 1);
     }
 
+    // Stored some other way, a shared offset is still served, so running applications keep working
+    @Test
+    public void stillServesServicesSharingAnOffset() throws Exception {
+        execute("INSERT INTO services VALUES ('echo', 'Echo', 0, 'Shop', 'Echo', 'PRIMARY_MIRROR')");
+        watcher.reload();
+        Assert.assertTrue(registry.catalog().find("echo").isPresent());
+        Assert.assertTrue(registry.catalog().find("ping").isPresent());
+    }
+
     @Test
     public void describesWhatChanged() {
         ServiceDefinition ping = new ServiceDefinition("ping", "Ping", 0, "Group", "Application",

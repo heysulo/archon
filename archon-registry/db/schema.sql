@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS services (
     created_at  TIMESTAMP                               NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP                               NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    -- Two services of one application with the same offset would bind the same port on every instance
-    UNIQUE KEY uq_services_app_port (app_group, app_name, port_offset),
+    -- Each port offset belongs to one service across every application, so a port names exactly one service
+    UNIQUE KEY uq_services_port_offset (port_offset),
     CONSTRAINT chk_services_id_not_blank CHECK (CHAR_LENGTH(TRIM(id)) > 0),
     CONSTRAINT chk_services_name_not_blank CHECK (CHAR_LENGTH(TRIM(name)) > 0),
     CONSTRAINT chk_services_app_group_not_blank CHECK (CHAR_LENGTH(TRIM(app_group)) > 0),

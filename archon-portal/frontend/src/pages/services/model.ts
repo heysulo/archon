@@ -94,3 +94,24 @@ export function identifierError(value: string): string | null {
 }
 
 export const MAX_PORT_OFFSET = 65534;
+
+/** Which service holds each port offset. Offsets are unique across every service. */
+export function takenOffsets(services: Service[]): Map<number, string> {
+  return new Map(services.map((service) => [service.portOffset, service.id]));
+}
+
+/** Why an offset cannot be used by the service with {@code ownId} (null when adding), or null if it can. */
+export function offsetError(value: unknown, taken: Map<number, string>, ownId: string | null): string | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_PORT_OFFSET) {
+    return `A whole number from 0 to ${MAX_PORT_OFFSET}`;
+  }
+  const holder = taken.get(value);
+  return holder && holder !== ownId ? `Taken by ${holder}` : null;
+}
+
+/** The lowest offset no service holds, for a new service. */
+export function firstFreeOffset(taken: Map<number, string>): number {
+  let offset = 0;
+  while (taken.has(offset) && offset < MAX_PORT_OFFSET) offset++;
+  return offset;
+}

@@ -88,7 +88,7 @@ public class PortalServerTest {
         configs.clear();
         database.execute("DELETE FROM services");
         database.execute("INSERT INTO services (id, name, port_offset, app_group, app_name, mode) VALUES "
-                + "('archon-config', 'Archon configuration', 1, 'Archon', 'Config', 'PRIMARY_MIRROR')");
+                + "('archon-config', 'Archon configuration', 0, 'Archon', 'Config', 'PRIMARY_MIRROR')");
         configs.failure = null;
         configs.synced = true;
         feed.snapshot = ProcessSnapshot.of("10.21.3.202", 3, List.of(LEADER, STOPPED));
@@ -270,7 +270,7 @@ public class PortalServerTest {
 
     @Test
     public void managesServices() throws Exception {
-        String reports = "{\"id\":\" reports \",\"name\":\"Reports\",\"portOffset\":0,\"group\":\"Group\","
+        String reports = "{\"id\":\" reports \",\"name\":\"Reports\",\"portOffset\":5,\"group\":\"Group\","
                 + "\"application\":\"Application\",\"mode\":\"PRIMARY_MIRROR\"}";
         HttpResponse<String> created = post("/api/services", reports, adminCookie, true);
         Assert.assertEquals(created.statusCode(), 201, created.body());
@@ -281,7 +281,7 @@ public class PortalServerTest {
         Assert.assertTrue(listed.body().contains("\"id\":\"archon-config\""), listed.body());
         Assert.assertTrue(listed.body().contains("\"managedByArchon\":true"), listed.body());
 
-        HttpResponse<String> updated = send("PUT", "/api/services/reports", reports.replace("\"portOffset\":0",
+        HttpResponse<String> updated = send("PUT", "/api/services/reports", reports.replace("\"portOffset\":5",
                 "\"portOffset\":4").replace("PRIMARY_MIRROR", "LOAD_BALANCE"), adminCookie);
         Assert.assertEquals(updated.statusCode(), 200, updated.body());
         Assert.assertTrue(updated.body().contains("\"portOffset\":4"), updated.body());
@@ -296,10 +296,14 @@ public class PortalServerTest {
         String base = "{\"id\":\"search\",\"name\":\"Search\",\"portOffset\":2,\"group\":\"Shop\","
                 + "\"application\":\"Search\",\"mode\":\"LOAD_BALANCE\"}";
         Assert.assertEquals(post("/api/services", base, adminCookie, true).statusCode(), 201);
-        HttpResponse<String> clash = post("/api/services", base.replace("\"search\"", "\"index\""), adminCookie,
-                true);
-        Assert.assertEquals(clash.statusCode(), 409, "same application and offset");
-        Assert.assertTrue(clash.body().contains("already serves search"), clash.body());
+        // Another application entirely: offsets are unique across every service
+        HttpResponse<String> clash = post("/api/services", base.replace("\"search\"", "\"index\"")
+                .replace("\"Shop\"", "\"Library\""), adminCookie, true);
+        Assert.assertEquals(clash.statusCode(), 409, "same offset, other application");
+        Assert.assertTrue(clash.body().contains("Port offset 2 is taken by search"), clash.body());
+        Assert.assertEquals(post("/api/services", base.replace("\"search\"", "\"archon-clash\"")
+                .replace("\"portOffset\":2", "\"portOffset\":0"), adminCookie, true).statusCode(), 409,
+                "taken by archon-config");
         Assert.assertEquals(post("/api/services", base.replace("search\",\"name", "has space\",\"name"),
                 adminCookie, true).statusCode(), 400);
         Assert.assertEquals(post("/api/services", base.replace("\"portOffset\":2", "\"portOffset\":70000"),
@@ -341,7 +345,7 @@ public class PortalServerTest {
         Assert.assertEquals(send("DELETE", "/api/services/archon-config", null, adminCookie).statusCode(), 400);
         Assert.assertEquals(post("/api/services", archon.replace("archon-config", "archon-extra"), adminCookie,
                 true).statusCode(), 400);
-        Assert.assertTrue(get("/api/services", adminCookie).body().contains("\"portOffset\":1"));
+        Assert.assertTrue(get("/api/services", adminCookie).body().contains("\"portOffset\":0"));
     }
 
     @Test

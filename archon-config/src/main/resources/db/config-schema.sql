@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS configuration_revision (
 
 INSERT IGNORE INTO configuration_revision (id, revision) VALUES (1, 0);
 
--- archon-config serves its own service through the registry. Registries read services when they start, so a
--- new row takes effect after they restart.
-INSERT IGNORE INTO services (id, name, port_offset, app_group, app_name, mode)
-VALUES ('archon-config', 'Archon configuration', 1, 'Archon', 'Config', 'PRIMARY_MIRROR');
+-- archon-config serves its own service through the registry, which re-reads services every 10 seconds. The row is
+-- set on every start, so it matches this release. Port offset 0 is archon-config's: offsets are unique across all
+-- services.
+INSERT INTO services (id, name, port_offset, app_group, app_name, mode)
+VALUES ('archon-config', 'Archon configuration', 0, 'Archon', 'Config', 'PRIMARY_MIRROR')
+ON DUPLICATE KEY UPDATE name = 'Archon configuration', port_offset = 0, app_group = 'Archon', app_name = 'Config',
+                        mode = 'PRIMARY_MIRROR';

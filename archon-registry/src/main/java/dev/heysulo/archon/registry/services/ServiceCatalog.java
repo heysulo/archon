@@ -60,6 +60,7 @@ public final class ServiceCatalog {
             try (Connection connection = database.connect()) {
                 ServiceCatalog catalog = load(connection);
                 LOGGER.info("Loaded {} service definitions from {}", catalog.size(), database);
+                catalog.warnAboutSharedOffsets();
                 return catalog;
             } catch (SQLException e) {
                 lastFailure = e;
@@ -95,6 +96,22 @@ public final class ServiceCatalog {
             }
         }
         return new ServiceCatalog(Map.copyOf(definitions));
+    }
+
+    /**
+     * Offsets are unique across services; the portal refuses to store a second service on one. Rows written some
+     * other way are still served, since refusing them would break running applications, but are reported.
+     */
+    void warnAboutSharedOffsets() {
+        Map<Integer, List<String>> byOffset = new java.util.TreeMap<>();
+        definitions.values().forEach(definition -> byOffset.computeIfAbsent(definition.portOffset(), key -> new ArrayList<>())
+                .add(definition.id()));
+        byOffset.forEach((offset, ids) -> {
+            if (ids.size() > 1) {
+                LOGGER.warn("Port offset {} is shared by {}; give each service its own", offset,
+                        String.join(", ", ids));
+            }
+        });
     }
 
     public Optional<ServiceDefinition> find(String serviceId) {

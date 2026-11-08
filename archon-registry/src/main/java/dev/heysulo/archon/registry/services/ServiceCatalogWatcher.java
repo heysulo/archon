@@ -66,6 +66,7 @@ public final class ServiceCatalogWatcher {
         if (!changes.isEmpty()) {
             registry.setCatalog(next);
             LOGGER.info("Services changed: {}", changes);
+            next.warnAboutSharedOffsets();
         }
     }
 

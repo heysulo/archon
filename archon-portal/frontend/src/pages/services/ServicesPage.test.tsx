@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { ProcessStreamContext, type ProcessStreamState } from "../../api/processStream";
 import { mockPortal, renderWith } from "../../test/render";
 import { ServicesPage } from "./ServicesPage";
@@ -59,6 +59,13 @@ describe("ServicesPage", () => {
     expect(await screen.findByLabelText("ping is running")).toBeInTheDocument();
     expect(screen.queryByLabelText("Actions for ping")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Actions for reports")).toBeInTheDocument();
+  });
+
+  it("starts a new service on the lowest free port offset", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Add service" }));
+    // ping holds 0, archon-config 1 and reports 3
+    expect(await screen.findByLabelText("Port offset")).toHaveValue("2");
   });
 
   it("offers no changes to users who can only view", async () => {

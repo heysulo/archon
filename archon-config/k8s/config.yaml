@@ -22,7 +22,7 @@ spec:
         env:
         - name: ARCHON_REGISTRY_LOCATIONS
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
-        # archon-config's port offset is 1, so the primary serves on 9101. Applications find it through the
+        # archon-config's port offset is 0, so the primary serves on 9100. Applications find it through the
         # registry, at the pod's address, so no Kubernetes Service is needed.
         - name: ARCHON_BASE_PORT
           value: "9100"
@@ -48,5 +48,5 @@ spec:
               name: archon-db
               key: password
         ports:
-        - containerPort: 9101
+        - containerPort: 9100
           name: config

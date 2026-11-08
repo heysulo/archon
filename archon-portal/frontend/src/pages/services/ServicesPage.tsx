@@ -7,8 +7,8 @@ import { useMemo, useState } from "react";
 import { useProcessStream } from "../../api/processStream";
 import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
-import { announcements, instancesByService, matches, MODE_LABELS, undefinedServices, type ServiceInstance }
-  from "./model";
+import { announcements, instancesByService, matches, MODE_LABELS, takenOffsets, undefinedServices,
+  type ServiceInstance } from "./model";
 import { ServiceFormModal } from "./ServiceFormModal";
 import { useServiceMutations, useServices, type Service, type ServiceInput } from "./servicesApi";
 
@@ -54,6 +54,7 @@ export function ServicesPage() {
   );
   const strays = useMemo(() => undefinedServices(instances, all), [instances, all]);
   const announced = useMemo(() => announcements(snapshot?.processes ?? []), [snapshot]);
+  const taken = useMemo(() => takenOffsets(all), [all]);
   const shown = useMemo(() => all.filter((service) => matches(service, query)), [all, query]);
 
   const save = async (input: ServiceInput) => {
@@ -204,8 +205,8 @@ export function ServicesPage() {
         </Card>
       )}
 
-      <ServiceFormModal opened={editing !== undefined} service={editing ?? null} onClose={() => setEditing(undefined)}
-                        onSubmit={save} />
+      <ServiceFormModal opened={editing !== undefined} service={editing ?? null} taken={taken}
+                        onClose={() => setEditing(undefined)} onSubmit={save} />
       <Modal opened={deleting !== null} onClose={() => setDeleting(null)} title={`Delete ${deleting?.id ?? ""}?`}>
         <Stack>
           <Text size="sm">

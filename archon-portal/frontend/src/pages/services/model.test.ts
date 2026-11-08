@@ -1,5 +1,6 @@
 import type { ProcessInfo } from "../../api/types";
-import { announcements, instancesByService, matches, parseServed, undefinedServices } from "./model";
+import { announcements, firstFreeOffset, instancesByService, matches, offsetError, parseServed, takenOffsets,
+  undefinedServices } from "./model";
 import type { Service, ServiceMode } from "./servicesApi";
 
 function process(rank: number, services: string[], extra: Partial<ProcessInfo> = {}): ProcessInfo {
@@ -45,6 +46,23 @@ describe("services model", () => {
     const counts = announcements([process(1, ["ping@a:9000"]), process(2, ["ping@b:9000"], { running: false })]);
     expect(counts.get("ping")).toBe(2);
     expect(counts.has("search")).toBe(false);
+  });
+
+  it("suggests the lowest port offset no service holds", () => {
+    const taken = takenOffsets([{ ...PING, id: "archon-config", portOffset: 0 }, { ...PING, portOffset: 1 },
+      { ...PING, id: "search", portOffset: 3 }]);
+    expect(taken.get(1)).toBe("ping");
+    expect(firstFreeOffset(taken)).toBe(2);
+    expect(firstFreeOffset(new Map())).toBe(0);
+  });
+
+  it("refuses an offset another service holds, but not the service's own", () => {
+    const taken = takenOffsets([PING, { ...PING, id: "search", portOffset: 3 }]);
+    expect(offsetError(3, taken, null)).toBe("Taken by search");
+    expect(offsetError(3, taken, "search")).toBeNull();
+    expect(offsetError(4, taken, null)).toBeNull();
+    expect(offsetError(1.5, taken, null)).toMatch(/whole number/);
+    expect(offsetError(70000, taken, null)).toMatch(/whole number/);
   });
 
   it("searches ids, names, owners and modes", () => {
