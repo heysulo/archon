@@ -4,7 +4,6 @@ import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
 import dev.heysulo.archon.sdk.constant.RegistryConstants;
-import dev.heysulo.archon.sdk.utils.Utils;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.client.callback.ClientCallback;
 import dev.heysulo.databridge.core.common.Message;
@@ -15,19 +14,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.ToLongFunction;
 
-public class RegistryLookupService implements ClientCallback {
+/**
+ * Finds the primary registry. Safe to call from several threads at once: each lookup has its own connection and
+ * waits for its own answer.
+ */
+public class RegistryLookupService {
     static final long NOT_PRIMARY = -1;
     private static final long LOOKUP_TIMEOUT_MILLIS = 5_000;
-    private static final long LOOKUP_POLL_MILLIS = 100;
     private static final Logger LOGGER = LoggerFactory.getLogger(RegistryLookupService.class);
     private static RegistryLookupService instance;
     private final EventLoopGroup eventLoopGroup =
             new NioEventLoopGroup(1, new DefaultThreadFactory("registry-lookup-worker", true));
-    // The answer to the lookup in progress: the responder's term if it is primary, NOT_PRIMARY otherwise
-    private volatile Long answer = null;
 
     private RegistryLookupService() {
     }
@@ -79,18 +81,18 @@ public class RegistryLookupService implements ClientCallback {
     }
 
     private long primaryTerm(String registryLocation) {
-        Client lookupConnection = new Client(registryLocation, RegistryConstants.PORT, this, eventLoopGroup);
+        Lookup lookup = new Lookup();
+        Client lookupConnection = new Client(registryLocation, RegistryConstants.PORT, lookup, eventLoopGroup);
         lookupConnection.settings().setConnectTimeout(RegistryConstants.CONNECT_TIMEOUT);
         try {
-            answer = null;
             lookupConnection.connect();
             lookupConnection.send(new PrimaryRegistryLookupMessage());
             LOGGER.debug("Waiting for registry lookup response from {}", registryLocation);
-            Utils.waitForCondition(() -> answer != null, LOOKUP_TIMEOUT_MILLIS, LOOKUP_POLL_MILLIS);
-            if (answer == NOT_PRIMARY) {
+            long term = lookup.answer.get(LOOKUP_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            if (term == NOT_PRIMARY) {
                 LOGGER.debug("{} is not the primary registry", registryLocation);
             }
-            return answer;
+            return term;
         } catch (TimeoutException e) {
             LOGGER.warn("Registry lookup response timed out: {}", registryLocation);
         } catch (InterruptedException e) {
@@ -120,25 +122,33 @@ public class RegistryLookupService implements ClientCallback {
         }
     }
 
-    @Override
-    public void onConnect(Client client) {
-        LOGGER.debug("Connected to registry at {}", client.getRemoteAddress());
-    }
+    /**
+     * One lookup's connection callback. Each lookup has its own, so two threads looking up at once cannot take each
+     * other's answers, as they could when one shared field held the answer to whichever lookup was in progress.
+     */
+    static final class Lookup implements ClientCallback {
+        final CompletableFuture<Long> answer = new CompletableFuture<>();
 
-    @Override
-    public void onDisconnect(Client client) {
-        LOGGER.debug("Disconnected from registry at {}", client.getRemoteAddress());
-    }
-
-    @Override
-    public void onMessage(Client client, Message message) {
-        if (message instanceof PrimaryRegistryLookupResponseMessage lookup) {
-            answer = lookup.getRank() == RegistryProtocol.RANK_PRIMARY ? lookup.getTerm() : NOT_PRIMARY;
+        @Override
+        public void onConnect(Client client) {
+            LOGGER.debug("Connected to registry at {}", client.getRemoteAddress());
         }
-    }
 
-    @Override
-    public void onError(Client client, Throwable throwable) {
-        LOGGER.error("Error on registry lookup client", throwable);
+        @Override
+        public void onDisconnect(Client client) {
+            LOGGER.debug("Disconnected from registry at {}", client.getRemoteAddress());
+        }
+
+        @Override
+        public void onMessage(Client client, Message message) {
+            if (message instanceof PrimaryRegistryLookupResponseMessage response) {
+                answer.complete(response.getRank() == RegistryProtocol.RANK_PRIMARY ? response.getTerm() : NOT_PRIMARY);
+            }
+        }
+
+        @Override
+        public void onError(Client client, Throwable throwable) {
+            LOGGER.error("Error on registry lookup client", throwable);
+        }
     }
 }

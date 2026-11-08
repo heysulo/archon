@@ -1,10 +1,12 @@
 package dev.heysulo.archon.sdk.registry;
 
+import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static dev.heysulo.archon.sdk.registry.RegistryLookupService.NOT_PRIMARY;
 
@@ -35,6 +37,22 @@ public class RegistryLookupServiceTest {
     public void acceptsALonePrimaryWhateverItsTerm() {
         Assert.assertEquals(choose(Map.of("10.21.3.201", 9L)), "10.21.3.201");
         Assert.assertEquals(choose(Map.of("10.21.3.201", 1L)), "10.21.3.201");
+    }
+
+    // The portal looks up from two threads at once. A mirror's lookup must never take the primary's answer.
+    @Test
+    public void concurrentLookupsKeepTheirOwnAnswers() throws Exception {
+        RegistryLookupService.Lookup askingPrimary = new RegistryLookupService.Lookup();
+        RegistryLookupService.Lookup askingMirror = new RegistryLookupService.Lookup();
+        PrimaryRegistryLookupResponseMessage primary = new PrimaryRegistryLookupResponseMessage(1);
+        primary.setTerm(10);
+
+        askingPrimary.onMessage(null, primary);
+
+        Assert.assertEquals(askingPrimary.answer.get(1, TimeUnit.SECONDS), Long.valueOf(10));
+        Assert.assertFalse(askingMirror.answer.isDone());
+        askingMirror.onMessage(null, new PrimaryRegistryLookupResponseMessage(2));
+        Assert.assertEquals(askingMirror.answer.get(1, TimeUnit.SECONDS), Long.valueOf(NOT_PRIMARY));
     }
 
     private static String choose(Map<String, Long> primaries) {
