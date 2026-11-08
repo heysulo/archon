@@ -5,6 +5,11 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationTerminationMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.PrimaryRegistryLookupResponseMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ProcessListRequest;
+import dev.heysulo.archon.dictionary.sdk.messages.ProcessListResponse;
+import dev.heysulo.archon.dictionary.sdk.messages.ProcessWatchRequest;
+import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
+import dev.heysulo.archon.dictionary.sdk.services.ProcessInfo;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
@@ -48,6 +53,7 @@ import static dev.heysulo.archon.registry.constants.Constants.RANK_UNKNOWN;
 import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_FAILOVER_CONNECTION_ATTEMPTS;
 import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_LOSER_EXIT_DELAY;
 import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_PRIMARY_SCAN_INTERVAL;
+import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_RECONNECT_GRACE;
 
 public class RegistryServer implements ServerCallback {
     private static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME,
@@ -125,6 +131,10 @@ public class RegistryServer implements ServerCallback {
         } else if (message instanceof ServiceLookupMessage lookup) {
             // Lookups need no registration, so tools and unregistered clients can find services too
             connection.send(ServiceRegistry.getInstance().lookup(lookup));
+        } else if (message instanceof ProcessListRequest request) {
+            connection.send(new ProcessListResponse(request.getRequestId(), getTerm(), listProcesses()));
+        } else if (message instanceof ProcessWatchRequest) {
+            ProcessWatchers.getInstance().watch(connection);
         } else {
             LOGGER.warn("Dropping message from {} type {}. Unhandled", connection.getRemoteAddress(),
                     message.getClass().getSimpleName());
@@ -135,25 +145,37 @@ public class RegistryServer implements ServerCallback {
             ApplicationRegistrationMessage registrationMessage) {
         if (registrationMessage.getRank() == RANK_UNKNOWN) {
             registerNewApplicationInstance(registrationMessage.getGroupName(),
-                    registrationMessage.getApplicationName(), connection);
+                    registrationMessage.getApplicationName(), detailsOf(registrationMessage, connection), connection);
         } else {
             reRegisterApplicationInstance(
                     registrationMessage.getGroupName(), registrationMessage.getApplicationName(),
-                    registrationMessage.getRank(), registrationMessage.getAuthenticationToken(), connection);
+                    registrationMessage.getRank(), registrationMessage.getAuthenticationToken(),
+                    detailsOf(registrationMessage, connection), connection);
         }
+    }
+
+    // Older SDKs send no details, and the placeholder address "TBD"; the connection's address is the best guess
+    private static InstanceDetails detailsOf(ApplicationRegistrationMessage message, Connection connection) {
+        InstanceDetails reported = message.getDetails();
+        if (reported == null) {
+            return new InstanceDetails(null, connection.getRemoteAddress(), null);
+        }
+        return reported.withAddressOr(connection.getRemoteAddress());
     }
 
     // Registration and re-registration share the namespace lock, so a rank cannot be handed out while an instance
     // is reclaiming it.
-    private void registerNewApplicationInstance(String group, String name, Connection connection) {
+    private void registerNewApplicationInstance(String group, String name, InstanceDetails details,
+            Connection connection) {
         ApplicationManager.withNamespaceLock(group, name, () -> {
             Application application = applicationManager.createApplicationWithNextAvailableRank(group, name);
+            application.setDetails(details);
             application.handleRegistration(connection);
         });
     }
 
     private void reRegisterApplicationInstance(String group, String name, int rank, String authenticationToken,
-            Connection connection) {
+            InstanceDetails details, Connection connection) {
         ApplicationManager.withNamespaceLock(group, name, () -> {
             Application application = applicationManager.findApplication(group, name, rank);
             if (application == null) {
@@ -168,6 +190,7 @@ public class RegistryServer implements ServerCallback {
                 askToTerminate(connection, ApplicationTermination.REASON_RANK_HELD_BY_ANOTHER_INSTANCE);
                 return;
             }
+            application.setDetails(details);
             application.setConnection(connection);
             application.setRunLevel(RunLevel.RUNNING);
             LOGGER.info("Application {} re-registered with client: {}", application.getDisplayName(),
@@ -260,9 +283,23 @@ public class RegistryServer implements ServerCallback {
         // Mirrors joining at the same time arrive on different event loops; the lock keeps their ranks distinct.
         ApplicationManager.withNamespaceLock(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, () -> {
             if (Application.getApplication(connection) == null) {
-                setupMirrorRegistry(connection, message.getRank());
+                setupMirrorRegistry(connection, message);
             }
         });
+    }
+
+    /** Every application instance this registry knows, in any state, ordered by application and rank. */
+    List<ProcessInfo> listProcesses() {
+        ServiceRegistry services = ServiceRegistry.getInstance();
+        return applicationManager.findAllKnownApplications().stream()
+                // This registry's own record has no connection to itself, but it is plainly present
+                .map(app -> new ProcessInfo(app.getGroup(), app.getName(), app.getRank(),
+                        String.valueOf(app.getRunLevel()), app.isRunning(),
+                        app == applicationRegistry || app.isConnected(), services.servicesOf(app), app.getDetails()))
+                .sorted(java.util.Comparator.comparing(ProcessInfo::group)
+                        .thenComparing(ProcessInfo::name)
+                        .thenComparingInt(ProcessInfo::rank))
+                .toList();
     }
 
     @Override
@@ -345,9 +382,32 @@ public class RegistryServer implements ServerCallback {
             applicationRegistry = applicationManager.createApplication(
                     APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_PRIMARY);
         }
+        applicationRegistry.setDetails(ownDetails());
         applicationRegistry.setRunLevel(RunLevel.RUNNING);
         retireDisconnectedMirrorRecords();
         scanForOtherPrimaries();
+        primaryScanExecutor.schedule(this::retireUnclaimedRecords, REGISTRY_RECONNECT_GRACE.toMillis(),
+                TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Retires the application records nobody reclaimed since this registry became primary. Their instances died
+     * during the failover, so they will never disconnect from this registry, and a dead leader would otherwise
+     * keep its rank and block its standbys' promotion.
+     */
+    void retireUnclaimedRecords() {
+        if (getRank() != RANK_PRIMARY) {
+            return;
+        }
+        long retired = applicationManager.findAllKnownApplications().stream()
+                .filter(app -> !isRegistryRecord(app))
+                .filter(Application::retireIfUnclaimed)
+                .count();
+        LOGGER.info("Reconnect grace over: {} unclaimed application records retired", retired);
+    }
+
+    private static boolean isRegistryRecord(Application app) {
+        return APPLICATION_GROUP_NAME.equals(app.getGroup()) && APPLICATION_NAME_REGISTRY.equals(app.getName());
     }
 
     // A primary that loses its mirrors keeps serving. If it was partitioned off, the other side may elect its own
@@ -379,14 +439,24 @@ public class RegistryServer implements ServerCallback {
                 .forEach(app -> app.setRunLevel(RunLevel.KILLED));
     }
 
-    private void setupMirrorRegistry(Connection connection, int previousRank) {
+    private void setupMirrorRegistry(Connection connection, LeaderElectionMessage message) {
+        int previousRank = message.getRank();
         Application mirrorInstance = findRegistryInstance(previousRank);
         if (previousRank < RANK_MIRROR || mirrorInstance == null || mirrorInstance.isConnected()) {
             // Rank 1 belongs to this primary even before actAsPrimary records it.
             mirrorInstance = applicationManager.createApplicationWithNextAvailableRank(
                     APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_MIRROR);
         }
+        InstanceDetails reported = message.getDetails();
+        mirrorInstance.setDetails(reported != null
+                ? reported.withAddressOr(message.getAddress())
+                : new InstanceDetails(null, message.getAddress(), null));
         mirrorInstance.handleRegistration(connection);
+    }
+
+    /** This registry's own details: its pod, its load balancer address and its node. */
+    public static InstanceDetails ownDetails() {
+        return InstanceDetails.fromEnvironment(Constants.getMyAddress());
     }
 
     /**

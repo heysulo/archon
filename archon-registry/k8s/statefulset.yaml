@@ -26,6 +26,11 @@ spec:
               fieldPath: metadata.name
         - name: ARCHON_REGISTRY_LOCATIONS
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
+        # Shown on the portal, with the pod name from HOSTNAME
+        - name: ARCHON_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         - name: ARCHON_DB_URL
           value: "jdbc:mysql://mysql.heysulo.internal:3306/archon"
         # Created by hand, never committed:

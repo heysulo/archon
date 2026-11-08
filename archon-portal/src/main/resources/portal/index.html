@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archon Portal</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #e3e6ea;
+    --text: #1d2329;
+    --muted: #66707a;
+    --accent: #3a5ccc;
+    --ok: #1f8a4c;
+    --ok-bg: #e5f4ea;
+    --warn: #a86400;
+    --warn-bg: #fbf0dc;
+    --bad: #b3261e;
+    --bad-bg: #fbe7e5;
+    --idle: #66707a;
+    --idle-bg: #eef0f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111417;
+      --surface: #1a1e22;
+      --border: #2b3137;
+      --text: #e6e9ec;
+      --muted: #98a2ab;
+      --accent: #8aa4ff;
+      --ok: #5fd08c;
+      --ok-bg: #173323;
+      --warn: #f0b45a;
+      --warn-bg: #3a2c14;
+      --bad: #ff8a80;
+      --bad-bg: #3d1c1a;
+      --idle: #98a2ab;
+      --idle-bg: #262b30;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
+    padding: 20px 24px 12px;
+  }
+  h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .status { color: var(--muted); font-size: 13px; }
+  .status b { color: var(--text); font-weight: 600; }
+  .live { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; font-weight: 600; }
+  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+  .live.on { color: var(--ok); }
+  .live.on::before { background: var(--ok); animation: pulse 2s ease-in-out infinite; }
+  .live.off { color: var(--bad); }
+  .live.off::before { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .live.on::before { animation: none; } }
+  main { padding: 0 24px 32px; max-width: 1200px; }
+  .banner {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--bad-bg);
+    color: var(--bad);
+  }
+  .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .stat {
+    flex: 1 1 140px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .stat .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; color: var(--muted); }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .app {
+    margin-bottom: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .app h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0;
+    padding: 10px 16px;
+    font-size: 15px;
+    border-bottom: 1px solid var(--border);
+  }
+  .app h2 .group { color: var(--muted); font-weight: 400; }
+  .app h2 .count { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 400; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 8px 16px; text-align: left; white-space: nowrap; }
+  th { color: var(--muted); font-size: 12px; font-weight: 500; }
+  tbody tr + tr td { border-top: 1px solid var(--border); }
+  td.rank { font-variant-numeric: tabular-nums; width: 64px; }
+  .pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .pill.idle { background: var(--idle-bg); color: var(--idle); }
+  .role-lead { color: var(--accent); font-weight: 600; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  .dot.on { background: var(--ok); }
+  .dot.off { background: var(--bad); }
+  .service {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .none { color: var(--muted); }
+  .mono { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  tr.stopped td { opacity: 0.55; }
+  .empty { padding: 32px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Archon <span>Portal</span></h1>
+  <div class="status"><span class="live" id="live">Connecting</span> <span id="status"></span></div>
+</header>
+<main>
+  <div class="banner" id="banner"></div>
+  <section class="stats">
+    <div class="stat"><div class="value" id="stat-running">–</div><div class="label">Running processes</div></div>
+    <div class="stat"><div class="value" id="stat-apps">–</div><div class="label">Applications</div></div>
+    <div class="stat"><div class="value" id="stat-services">–</div><div class="label">Services served</div></div>
+  </section>
+  <div class="toolbar">
+    <label><input type="checkbox" id="show-stopped"> Show stopped processes</label>
+  </div>
+  <section id="apps"><div class="empty">Loading…</div></section>
+</main>
+<script>
+  // Archon's own components rank as one primary and any number of mirrors
+  const ARCHON_GROUP = "Archon";
+  const showStopped = document.getElementById("show-stopped");
+  let last = null;
+
+  try { showStopped.checked = localStorage.getItem("showStopped") === "true"; } catch (e) { /* no storage */ }
+  showStopped.addEventListener("change", () => {
+    try { localStorage.setItem("showStopped", showStopped.checked); } catch (e) { /* no storage */ }
+    if (last) render(last);
+  });
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+  }
+
+  function stateClass(process) {
+    if (process.runLevel === "RUNNING") return "ok";
+    if (process.running) return "warn";
+    if (process.runLevel === "KILLED" || process.runLevel === "FAILED") return "bad";
+    return "idle";
+  }
+
+  function role(process) {
+    const isArchon = process.group === ARCHON_GROUP;
+    const name = process.rank === 1 ? (isArchon ? "Primary" : "Leader") : (isArchon ? "Mirror" : "Standby");
+    if (process.rank <= 0) return '<span class="none">Unassigned</span>';
+    // A stopped record keeps the rank it last held; only running records hold one now
+    if (!process.running) return '<span class="none">Former ' + name.toLowerCase() + "</span>";
+    return process.rank === 1 ? '<span class="role-lead">' + name + "</span>" : name;
+  }
+
+  function detail(process, field) {
+    const value = process.details && process.details[field];
+    return value ? '<span class="mono">' + escapeHtml(value) + "</span>" : '<span class="none">–</span>';
+  }
+
+  function render(snapshot) {
+    last = snapshot;
+    const all = snapshot.processes;
+    const visible = all.filter(p => showStopped.checked || p.running);
+    const running = all.filter(p => p.running);
+    document.getElementById("stat-running").textContent = running.length;
+    document.getElementById("stat-apps").textContent = new Set(running.map(p => p.group + "/" + p.name)).size;
+    document.getElementById("stat-services").textContent = running.reduce((n, p) => n + p.services.length, 0);
+
+    const groups = new Map();
+    for (const process of visible) {
+      const key = process.group + "/" + process.name;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(process);
+    }
+    // Applications first, Archon's own components last
+    const isArchon = key => key.startsWith(ARCHON_GROUP + "/");
+    const keys = [...groups.keys()].sort((a, b) => isArchon(a) - isArchon(b) || a.localeCompare(b));
+    const container = document.getElementById("apps");
+    if (keys.length === 0) {
+      container.innerHTML = '<div class="empty">No ' + (showStopped.checked ? "" : "running ") + "processes.</div>";
+      return;
+    }
+    container.innerHTML = keys.map(key => {
+      const processes = groups.get(key);
+      const [group, name] = [processes[0].group, processes[0].name];
+      const runningCount = processes.filter(p => p.running).length;
+      const showNode = processes.some(p => p.details && p.details.node);
+      const rows = processes.map(p => '<tr class="' + (p.running ? "" : "stopped") + '">'
+        + '<td class="rank">' + escapeHtml(p.rank) + "</td>"
+        + "<td>" + role(p) + "</td>"
+        + '<td><span class="pill ' + stateClass(p) + '">' + escapeHtml(p.runLevel) + "</span></td>"
+        + "<td>" + detail(p, "host") + "</td>"
+        + "<td>" + detail(p, "address") + "</td>"
+        + (showNode ? "<td>" + detail(p, "node") + "</td>" : "")
+        + '<td><span class="dot ' + (p.connected ? "on" : "off") + '"></span>' + (p.connected ? "Connected" : "Disconnected") + "</td>"
+        + "<td>" + (p.services.length
+            ? p.services.map(s => '<span class="service">' + escapeHtml(s) + "</span>").join("")
+            : '<span class="none">–</span>') + "</td>"
+        + "</tr>").join("");
+      return '<section class="app"><h2><span class="group">' + escapeHtml(group) + " /</span> " + escapeHtml(name)
+        + '<span class="count">' + runningCount + " running"
+        + (processes.length > runningCount ? ", " + (processes.length - runningCount) + " stopped" : "") + "</span></h2>"
+        + '<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Role</th><th>State</th><th>Host</th><th>Address</th>'
+        + (showNode ? "<th>Node</th>" : "") + '<th>Registry link</th><th>Services</th></tr></thead>'
+        + "<tbody>" + rows + "</tbody></table></div></section>";
+    }).join("");
+  }
+
+  const banner = document.getElementById("banner");
+  const status = document.getElementById("status");
+  const live = document.getElementById("live");
+
+  function setLive(state, text) {
+    live.className = "live " + state;
+    live.textContent = text;
+  }
+
+  function showBanner(message) {
+    banner.textContent = message;
+    banner.style.display = "block";
+  }
+
+  // The portal pushes the process list whenever it changes. EventSource reconnects by itself when the stream
+  // breaks, possibly to another portal replica.
+  function connect() {
+    const source = new EventSource("api/events");
+    source.addEventListener("snapshot", event => {
+      const body = JSON.parse(event.data);
+      banner.style.display = "none";
+      setLive("on", "Live");
+      const servedBy = body.servedBy
+        ? " · served by <b>" + escapeHtml(body.servedBy.host) + "</b> (" + escapeHtml(body.servedBy.role)
+          + (body.servedBy.rank > 0 ? ", rank " + escapeHtml(body.servedBy.rank) : "") + ")"
+        : "";
+      status.innerHTML = "Primary registry <b>" + escapeHtml(body.registry) + "</b> · term " + escapeHtml(body.term)
+        + servedBy + " · changed " + escapeHtml(new Date(body.generatedAt).toLocaleTimeString());
+      render(body);
+    });
+    source.addEventListener("offline", event => {
+      setLive("off", "Registry unavailable");
+      showBanner("No answer from the registries: " + JSON.parse(event.data).error
+        + (last ? ". Showing the last known state." : "."));
+    });
+    source.onerror = () => {
+      setLive("off", "Reconnecting");
+      showBanner("Lost the connection to the portal. Reconnecting…" + (last ? " Showing the last known state." : ""));
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>

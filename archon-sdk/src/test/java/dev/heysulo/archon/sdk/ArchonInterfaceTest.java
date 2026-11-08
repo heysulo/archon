@@ -14,4 +14,12 @@ public class ArchonInterfaceTest {
         Assert.assertEquals(message.getApplicationName(), "OrderApp");
         Assert.assertEquals(message.getRank(), 3);
     }
+
+    @Test
+    public void reportsWhereTheInstanceRuns() {
+        ApplicationRegistrationMessage message = ArchonInterface.registrationMessage("Shop", "OrderApp", 3);
+        Assert.assertNotNull(message.getDetails());
+        Assert.assertNotNull(message.getDetails().host());
+        Assert.assertNotEquals(message.getIpAddress(), "", "an address or the placeholder");
+    }
 }

@@ -1,6 +1,6 @@
 package dev.heysulo.archon.dictionary.sdk.messages;
 
-import dev.heysulo.databridge.core.common.Message;
+import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 
 public class ApplicationRegistrationMessage extends AuthenticatedMessage {
     private static final long serialVersionUID = 4082841948653972696L;
@@ -9,6 +9,8 @@ public class ApplicationRegistrationMessage extends AuthenticatedMessage {
     String groupName;
     String ipAddress;
     int rank;
+    // Absent from SDKs that predate it
+    InstanceDetails details;
 
     public ApplicationRegistrationMessage(String applicationName, String groupName, String ipAddress) {
         this.applicationName = applicationName;
@@ -46,5 +48,14 @@ public class ApplicationRegistrationMessage extends AuthenticatedMessage {
 
     public void setRank(int rank) {
         this.rank = rank;
+    }
+
+    /** Where the instance runs, or null from an SDK that does not report it. */
+    public InstanceDetails getDetails() {
+        return details;
+    }
+
+    public void setDetails(InstanceDetails details) {
+        this.details = details;
     }
 }

@@ -14,6 +14,9 @@ public final class Constants {
     public static final long REGISTRY_LEADER_ELECTION_POLL_MILLIS = 500;
     // A silent peer is dropped after two intervals, which bounds how long a dead primary goes unnoticed
     public static final Duration REGISTRY_HEARTBEAT_INTERVAL = Duration.ofSeconds(3);
+    // How long a new primary waits for the instances it inherited to reconnect before treating the rest as gone.
+    // Covers the SDK's reconnect loop, a lookup across every registry and a few heartbeats.
+    public static final Duration REGISTRY_RECONNECT_GRACE = Duration.ofSeconds(20);
     // How often a primary looks for registries it cannot see, including a rival primary after a partition
     public static final Duration REGISTRY_PRIMARY_SCAN_INTERVAL = Duration.ofSeconds(2);
     // How long a primary that lost the vote keeps running, so its standing reaches the winner first

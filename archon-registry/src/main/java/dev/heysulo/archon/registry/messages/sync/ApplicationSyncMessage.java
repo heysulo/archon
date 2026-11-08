@@ -1,6 +1,7 @@
 package dev.heysulo.archon.registry.messages.sync;
 
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
+import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 import dev.heysulo.archon.registry.applications.Application;
 
 public class ApplicationSyncMessage extends SyncMessage {
@@ -11,6 +12,7 @@ public class ApplicationSyncMessage extends SyncMessage {
     int rank;
     RunLevel runLevel;
     String authenticationToken;
+    InstanceDetails details;
 
     public ApplicationSyncMessage(Application application) {
         this.group = application.getGroup();
@@ -18,6 +20,11 @@ public class ApplicationSyncMessage extends SyncMessage {
         this.rank = application.getRank();
         this.runLevel = application.getRunLevel();
         this.authenticationToken = application.getAuthenticationToken();
+        this.details = application.getDetails();
+    }
+
+    public InstanceDetails getDetails() {
+        return details;
     }
 
     public String getGroup() {

@@ -17,4 +17,10 @@
         <Bug pattern="DM_EXIT"/>
         <Class name="dev.heysulo.archon.registry.server.RegistryTermination"/>
     </Match>
+    <!-- A portal replica that cannot register exits so its orchestrator starts a fresh one to retry. -->
+    <Match>
+        <Bug pattern="DM_EXIT"/>
+        <Class name="dev.heysulo.archon.portal.PortalApplication"/>
+        <Method name="register"/>
+    </Match>
 </FindBugsFilter>

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archon-portal
+  labels:
+    app: archon-portal
+spec:
+  # Any number: the registry ranks one primary and the rest as mirrors, and every replica serves
+  replicas: 2
+  selector:
+    matchLabels:
+      app: archon-portal
+  template:
+    metadata:
+      labels:
+        app: archon-portal
+    spec:
+      containers:
+      - name: archon-portal
+        image: 10.21.3.30:80/archon-portal:latest
+        imagePullPolicy: Always
+        env:
+        - name: ARCHON_REGISTRY_LOCATIONS
+          value: "10.21.3.201|10.21.3.202|10.21.3.203"
+        - name: PORTAL_PORT
+          value: "8080"
+        # Where this replica runs, shown on the portal
+        - name: ARCHON_ADVERTISED_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: ARCHON_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - containerPort: 8080
+          name: http
+        # Healthy whenever the portal serves, even while the registries fail over
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+# Read-only and without a login: reachable by anyone who can reach 10.21.3.204
+apiVersion: v1
+kind: Service
+metadata:
+  name: archon-portal
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.21.3.204
+  selector:
+    app: archon-portal
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: http

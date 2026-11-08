@@ -6,12 +6,11 @@ import dev.heysulo.archon.registry.server.RegistryServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -20,7 +19,8 @@ public class ApplicationManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(ApplicationManager.class);
     private static ApplicationManager instance;
     private static final ConcurrentHashMap<String, ReentrantLock> namespaceLocks = new ConcurrentHashMap<>();
-    private final Map<String, ArrayList<Application>> applications = new HashMap<>();
+    // Read by lookups and the portal while registrations add to it, so both levels are safe to iterate concurrently
+    private final Map<String, List<Application>> applications = new ConcurrentHashMap<>();
 
     private ApplicationManager() {
     }
@@ -48,7 +48,7 @@ public class ApplicationManager {
 
     public List<Application> findAllApplications(String group, String name) {
         String appDefName = buildApplicationDefinitionName(group, name);
-        return applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+        return applications.computeIfAbsent(appDefName, k -> new CopyOnWriteArrayList<>());
     }
 
     public List<Application> findAllKnownApplications() {
@@ -70,7 +70,7 @@ public class ApplicationManager {
 
     private int findNextAvailableApplicationRank(String group, String name, int lowestRank) {
         String appDefName = buildApplicationDefinitionName(group, name);
-        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new CopyOnWriteArrayList<>());
         Set<Integer> existingRanks = appList.stream()
                 .filter(Application::isRunning)
                 .map(Application::getRank)
@@ -91,7 +91,7 @@ public class ApplicationManager {
             application = new Application(group, name, rank);
         }
         String appDefName = buildApplicationDefinitionName(group, name);
-        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
+        List<Application> appList = applications.computeIfAbsent(appDefName, k -> new CopyOnWriteArrayList<>());
         application.setRegistryServer(RegistryServer.getInstance());
         appList.add(application);
         return application;

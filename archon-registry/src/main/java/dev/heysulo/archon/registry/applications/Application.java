@@ -7,9 +7,11 @@ import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationRespons
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceStartedMessage;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceStoppedMessage;
+import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
+import dev.heysulo.archon.registry.server.ProcessWatchers;
 import dev.heysulo.archon.registry.server.RegistryServer;
 import dev.heysulo.archon.registry.services.ServiceRegistry;
 import dev.heysulo.databridge.core.common.Connection;
@@ -36,6 +38,7 @@ public class Application implements ConnectionCallback {
     private Connection connection;
     private RunLevel runLevel;
     private String authenticationToken;
+    private volatile InstanceDetails details;
 
     public Application(String group, String name, int rank) {
         this.name = name;
@@ -131,12 +134,35 @@ public class Application implements ConnectionCallback {
                 return;
             }
             LOGGER.warn("{} disconnected from registry server.", this.getDisplayName());
-            ServiceRegistry.getInstance().forget(this);
-            setRunLevel(RunLevel.KILLED);
-            if (rank == RANK_PRIMARY) {
-                ApplicationManager.getInstance().electLeader(group, name);
-            }
+            markGone();
         });
+    }
+
+    /**
+     * Marks an instance that never reconnected to this registry as gone. After a failover the new primary holds
+     * the instances' states but none of their connections; an instance that died meanwhile never disconnects from
+     * it, so without this its record would stay running, and a dead leader would keep its rank forever.
+     *
+     * @return whether the record was retired; false if it is not running or has reconnected
+     */
+    public boolean retireIfUnclaimed() {
+        return ApplicationManager.withNamespaceLockReturn(group, name, () -> {
+            if (!isRunning() || isConnected()) {
+                return false;
+            }
+            LOGGER.warn("{} did not reconnect after this registry became primary. Marking it gone", getDisplayName());
+            markGone();
+            return true;
+        });
+    }
+
+    // Callers hold the namespace lock
+    private void markGone() {
+        ServiceRegistry.getInstance().forget(this);
+        setRunLevel(RunLevel.KILLED);
+        if (rank == RANK_PRIMARY) {
+            ApplicationManager.getInstance().electLeader(group, name);
+        }
     }
 
     @Override
@@ -174,6 +200,7 @@ public class Application implements ConnectionCallback {
             application = applicationManager.createApplication(group, name, rank);
         }
         application.setAuthenticationToken(syncMessage.getAuthenticationToken());
+        application.setDetails(syncMessage.getDetails());
         application.setRunLevel(syncMessage.getRunLevel());
         LOGGER.info("Synced application {}. Run Level: {}", application.getDisplayName(), application.getRunLevel());
     }
@@ -229,6 +256,15 @@ public class Application implements ConnectionCallback {
         return true;
     }
 
+    /** Where the instance runs, as it reported when it last registered. */
+    public InstanceDetails getDetails() {
+        return details;
+    }
+
+    public void setDetails(InstanceDetails details) {
+        this.details = details;
+    }
+
     public String getAuthenticationToken() {
         return authenticationToken;
     }
@@ -254,6 +290,8 @@ public class Application implements ConnectionCallback {
     }
 
     private void syncWithRegistryMirrors() {
+        // Every rank and run level change passes through here, so watchers hear about all of them
+        ProcessWatchers.getInstance().changed();
         if (registryServer == null) {
             LOGGER.warn("Registry server is not initialized. Cannot sync {} with registry mirrors", getDisplayName());
             return;

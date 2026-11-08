@@ -2,6 +2,7 @@ package dev.heysulo.archon.sdk;
 
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
+import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 import dev.heysulo.archon.sdk.exception.PrimaryRegistryCommunicationFailure;
 import dev.heysulo.archon.sdk.registry.PrimaryRegistry;
 import dev.heysulo.archon.sdk.registry.RegistryLookupService;
@@ -173,9 +174,12 @@ public class ArchonInterface {
     // The message takes the application name first
     static ApplicationRegistrationMessage registrationMessage(String groupName, String applicationName,
             int requestedRank) {
+        InstanceDetails details = InstanceDetails.fromEnvironment();
+        String address = details.address() != null ? details.address() : IP_ADDRESS_PLACEHOLDER;
         ApplicationRegistrationMessage message =
-                new ApplicationRegistrationMessage(applicationName, groupName, IP_ADDRESS_PLACEHOLDER);
+                new ApplicationRegistrationMessage(applicationName, groupName, address);
         message.setRank(requestedRank);
+        message.setDetails(details);
         return message;
     }
 

@@ -19,6 +19,7 @@
         <module>archon-dictionary</module>
         <module>archon-registry</module>
         <module>archon-sdk</module>
+        <module>archon-portal</module>
     </modules>
 
     <dependencyManagement>

@@ -259,8 +259,10 @@ public class LeaderElectorClient implements ClientCallback {
     }
 
     private void sendElectionMessage(Client client) {
-        send(client, new LeaderElectionMessage(RegistryServer.getRank(), RegistryServer.getTerm(),
-                Constants.getMyAddress(), Constants.APPLICATION_START_TIME));
+        LeaderElectionMessage message = new LeaderElectionMessage(RegistryServer.getRank(), RegistryServer.getTerm(),
+                Constants.getMyAddress(), Constants.APPLICATION_START_TIME);
+        message.setDetails(RegistryServer.ownDetails());
+        send(client, message);
     }
 
     private void send(Client client, Message message) {

@@ -9,6 +9,7 @@ import dev.heysulo.archon.dictionary.sdk.messages.ServiceStoppedMessage;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceEndpoint;
 import dev.heysulo.archon.registry.applications.Application;
+import dev.heysulo.archon.registry.server.ProcessWatchers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,6 +78,7 @@ public final class ServiceRegistry {
         running.computeIfAbsent(serviceId, id -> new ConcurrentHashMap<>())
                 .put(application, new Address(host, message.getPort()));
         LOGGER.info("{} is serving {} at {}:{}", application.getDisplayName(), serviceId, host, message.getPort());
+        ProcessWatchers.getInstance().changed();
         return ServiceStartResponseMessage.accepted(message.getRequestId(), serviceId);
     }
 
@@ -84,12 +86,27 @@ public final class ServiceRegistry {
         Map<Application, Address> instances = running.get(message.getServiceId());
         if (instances != null && instances.remove(application) != null) {
             LOGGER.info("{} stopped serving {}", application.getDisplayName(), message.getServiceId());
+            ProcessWatchers.getInstance().changed();
         }
+    }
+
+    /** The services an application instance serves, as {@code id@host:port}, ordered by id. */
+    public List<String> servicesOf(Application application) {
+        return running.entrySet().stream()
+                .filter(entry -> entry.getValue().containsKey(application))
+                .map(entry -> {
+                    Address address = entry.getValue().get(application);
+                    return address == null ? null : entry.getKey() + "@" + address.host() + ":" + address.port();
+                })
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
     }
 
     /** Forgets every service an application instance was running, as when it disconnects. */
     public void forget(Application application) {
         running.values().forEach(instances -> instances.remove(application));
+        ProcessWatchers.getInstance().changed();
     }
 
     // Ordered by rank. Of a primary/mirror service, the lowest ranked instance serves, matching app leadership.
