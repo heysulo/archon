@@ -42,7 +42,7 @@ public class PortalServerTest {
         try (ServerSocket free = new ServerSocket(0)) {
             port = free.getLocalPort();
         }
-        server = new PortalServer(feed, snapshot -> snapshot.servedBy(identity));
+        server = new PortalServer(feed, snapshot -> snapshot.servedBy(identity), "/portal-test");
         server.start(port);
     }
 
@@ -112,11 +112,48 @@ public class PortalServerTest {
     }
 
     @Test
-    public void servesThePageAndHealth() throws Exception {
-        Assert.assertTrue(get("/").body().contains("<title>Archon Portal</title>"));
-        Assert.assertTrue(get("/").body().contains("EventSource"));
+    public void servesTheAppForEveryRoute() throws Exception {
+        for (String route : List.of("/", "/processes", "/processes/Group/Application")) {
+            HttpResponse<String> response = get(route);
+            Assert.assertEquals(response.statusCode(), 200, route);
+            Assert.assertTrue(response.body().contains("<title>Archon Portal</title>"), route);
+            Assert.assertEquals(response.headers().firstValue("Cache-Control").orElse(""), "no-store", route);
+        }
         Assert.assertEquals(get("/healthz").statusCode(), 200);
-        Assert.assertEquals(get("/nothing-here").statusCode(), 404);
+    }
+
+    // File names carry a content hash, so a file under /assets/ never changes and can be cached for good
+    @Test
+    public void servesAssetsWithLongCaching() throws Exception {
+        HttpResponse<String> script = get("/assets/app-1a2b3c.js");
+        Assert.assertEquals(script.statusCode(), 200);
+        Assert.assertTrue(script.headers().firstValue("Content-Type").orElse("").startsWith("text/javascript"));
+        Assert.assertTrue(script.headers().firstValue("Cache-Control").orElse("").contains("immutable"));
+        Assert.assertEquals(get("/favicon.svg").headers().firstValue("Content-Type").orElse(""), "image/svg+xml");
+    }
+
+    @Test
+    public void answersMissingFilesAndApiPathsWith404() throws Exception {
+        Assert.assertEquals(get("/assets/gone-9f8e7d.js").statusCode(), 404);
+        Assert.assertEquals(get("/robots.txt").statusCode(), 404);
+        Assert.assertEquals(get("/api/nothing").statusCode(), 404);
+    }
+
+    @Test
+    public void refusesPathsLeavingTheBuildDirectory() throws Exception {
+        // Encoded dots reach the server as "..", which must never resolve outside the frontend's files
+        HttpResponse<String> response = get("/assets/%2e%2e/%2e%2e/dev/heysulo/archon/portal/PortalServer.class");
+        Assert.assertEquals(response.statusCode(), 404);
+        Assert.assertFalse(response.body().contains("PortalServer"));
+    }
+
+    @Test
+    public void setsSecurityHeaders() throws Exception {
+        HttpResponse<String> response = get("/");
+        Assert.assertTrue(response.headers().firstValue("Content-Security-Policy").orElse("").contains(
+                "default-src 'self'"));
+        Assert.assertEquals(response.headers().firstValue("X-Frame-Options").orElse(""), "DENY");
+        Assert.assertEquals(response.headers().firstValue("X-Content-Type-Options").orElse(""), "nosniff");
     }
 
     @Test

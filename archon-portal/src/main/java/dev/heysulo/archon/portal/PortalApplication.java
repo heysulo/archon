@@ -25,7 +25,7 @@ public final class PortalApplication {
         int port = port(System.getenv(PORT_ENV));
         PortalIdentity identity = new PortalIdentity();
         RegistryWatcher registry = new RegistryWatcher();
-        PortalServer server = new PortalServer(registry, snapshot -> snapshot.servedBy(identity));
+        PortalServer server = new PortalServer(registry, snapshot -> snapshot.servedBy(identity), "/portal");
         // Serving first: the page reports registry trouble itself, and registering waits until a primary answers
         server.start(port);
         registry.start();

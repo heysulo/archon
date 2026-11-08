@@ -8,11 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -24,7 +24,8 @@ import java.util.function.UnaryOperator;
 /**
  * Serves the portal page and its API:
  * <ul>
- *     <li>{@code GET /} the page</li>
+ *     <li>{@code GET /}, and any other path that is not a file or the API, the frontend app, which routes itself</li>
+ *     <li>{@code GET /assets/...} the app's files, cached for good because their names change with their content</li>
  *     <li>{@code GET /api/events} a Server-Sent Events stream: the process list at once, then again on every change,
  *     or an {@code offline} event while no primary registry answers</li>
  *     <li>{@code GET /api/processes} the latest process list as JSON, or 503 with an error</li>
@@ -34,7 +35,11 @@ import java.util.function.UnaryOperator;
 final class PortalServer implements ProcessFeed.Listener {
     static final int MAX_STREAMS = 200;
     private static final Logger LOGGER = LoggerFactory.getLogger(PortalServer.class);
-    private static final String PAGE = "/portal/index.html";
+    // Same origin only; Mantine sets inline styles, so styles may be inline
+    private static final String CONTENT_SECURITY_POLICY = "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+            + "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    private static final String CACHE_FOREVER = "public, max-age=31536000, immutable";
+    private static final String NO_STORE = "no-store";
     private static final int THREADS = 4;
     // A comment line now and then keeps proxies and load balancers from closing an idle stream
     private static final long KEEPALIVE_SECONDS = 15;
@@ -44,7 +49,7 @@ final class PortalServer implements ProcessFeed.Listener {
     private final Gson gson = new Gson();
     private final ProcessFeed feed;
     private final UnaryOperator<ProcessSnapshot> stamp;
-    private final byte[] page;
+    private final StaticAssets assets;
     private final Set<Stream> streams = ConcurrentHashMap.newKeySet();
     // Writes to browsers block, so they never run on the thread that hears from the registry
     private final ScheduledExecutorService broadcaster = Executors.newSingleThreadScheduledExecutor(
@@ -53,16 +58,15 @@ final class PortalServer implements ProcessFeed.Listener {
     private ExecutorService executor;
 
     /**
-     * @param stamp adds this replica's identity to each snapshot before it is sent
+     * @param stamp     adds this replica's identity to each snapshot before it is sent
+     * @param assetRoot the classpath directory holding the built frontend
      */
-    PortalServer(ProcessFeed feed, UnaryOperator<ProcessSnapshot> stamp) throws IOException {
+    PortalServer(ProcessFeed feed, UnaryOperator<ProcessSnapshot> stamp, String assetRoot) {
         this.feed = feed;
         this.stamp = stamp;
-        try (InputStream in = PortalServer.class.getResourceAsStream(PAGE)) {
-            if (in == null) {
-                throw new IOException("Missing " + PAGE);
-            }
-            this.page = in.readAllBytes();
+        this.assets = new StaticAssets(assetRoot);
+        if (assets.index().isEmpty()) {
+            LOGGER.warn("No frontend at {} in this build; the API still works", assetRoot);
         }
     }
 
@@ -71,7 +75,7 @@ final class PortalServer implements ProcessFeed.Listener {
         server.createContext("/api/events", this::events);
         server.createContext("/api/processes", this::processes);
         server.createContext("/healthz", exchange -> send(exchange, 200, "text/plain", "ok"));
-        server.createContext("/", this::page);
+        server.createContext("/", this::frontend);
         executor = Executors.newFixedThreadPool(THREADS);
         server.setExecutor(executor);
         feed.subscribe(this);
@@ -113,6 +117,7 @@ final class PortalServer implements ProcessFeed.Listener {
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
+        securityHeaders(exchange);
         // Length 0 streams the response in chunks until it is closed
         exchange.sendResponseHeaders(200, 0);
         Stream stream = new Stream(exchange);
@@ -143,16 +148,33 @@ final class PortalServer implements ProcessFeed.Listener {
         }
     }
 
-    private void page(HttpExchange exchange) throws IOException {
+    private void frontend(HttpExchange exchange) throws IOException {
         if (!isGet(exchange)) {
             return;
         }
         String path = exchange.getRequestURI().getPath();
-        if (!path.equals("/") && !path.equals("/index.html")) {
+        if (path.startsWith("/api/")) {
             send(exchange, 404, "text/plain", "Not found");
             return;
         }
-        send(exchange, 200, "text/html; charset=utf-8", page);
+        Optional<StaticAssets.Asset> file = path.equals("/") ? Optional.empty() : assets.find(path);
+        if (file.isPresent()) {
+            String caching = path.startsWith("/assets/") ? CACHE_FOREVER : "no-cache";
+            send(exchange, 200, file.get().contentType(), file.get().body(), caching);
+            return;
+        }
+        if (StaticAssets.looksLikeFile(path)) {
+            send(exchange, 404, "text/plain", "Not found");
+            return;
+        }
+        // An app route such as /processes: the app reads the address and shows the page itself. Never cached, so a
+        // deploy reaches the browser on its next load.
+        Optional<StaticAssets.Asset> index = assets.index();
+        if (index.isEmpty()) {
+            send(exchange, 503, "text/plain", "The frontend is not part of this build");
+            return;
+        }
+        send(exchange, 200, index.get().contentType(), index.get().body(), NO_STORE);
     }
 
     private String snapshotEvent(ProcessSnapshot snapshot) {
@@ -178,17 +200,25 @@ final class PortalServer implements ProcessFeed.Listener {
     }
 
     private static void send(HttpExchange exchange, int status, String contentType, String body) throws IOException {
-        send(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8));
+        send(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8), NO_STORE);
     }
 
-    private static void send(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
+    private static void send(HttpExchange exchange, int status, String contentType, byte[] body, String caching)
+            throws IOException {
         exchange.getResponseHeaders().set("Content-Type", contentType);
-        exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("Cache-Control", caching);
+        securityHeaders(exchange);
         exchange.sendResponseHeaders(status, body.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(body);
         }
+    }
+
+    private static void securityHeaders(HttpExchange exchange) {
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
+        exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+        exchange.getResponseHeaders().set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
     }
 
     /** One browser's open event stream. */
