@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
@@ -34,6 +35,7 @@ public final class ServiceManager {
     private final ToIntFunction<ServiceDefinition> portResolver;
     private final ServerFactory serverFactory;
     private final Supplier<String> advertisedHost;
+    private final BooleanSupplier onRegistryThread;
     private final PendingRequests requests = new PendingRequests();
     private final Map<String, RunningService> running = new ConcurrentHashMap<>();
 
@@ -49,15 +51,21 @@ public final class ServiceManager {
     /**
      * @param registry sends a message to the primary registry
      */
-    public ServiceManager(String group, String application, Consumer<Message> registry) {
+    /**
+     * @param onRegistryThread whether the calling thread is the registry connection's network thread, on which a
+     *                         blocking call would wait forever for an answer that thread must deliver
+     */
+    public ServiceManager(String group, String application, Consumer<Message> registry,
+            BooleanSupplier onRegistryThread) {
         this(group, application, registry, ServicePorts::fromEnvironment, BasicServer::new,
-                AdvertisedHost::fromEnvironment);
+                AdvertisedHost::fromEnvironment, onRegistryThread);
     }
 
     ServiceManager(String group, String application, Consumer<Message> registry,
             ToIntFunction<ServiceDefinition> portResolver, ServerFactory serverFactory,
-            Supplier<String> advertisedHost) {
+            Supplier<String> advertisedHost, BooleanSupplier onRegistryThread) {
         this.advertisedHost = advertisedHost;
+        this.onRegistryThread = onRegistryThread;
         this.group = group;
         this.application = application;
         this.registry = registry;
@@ -69,8 +77,9 @@ public final class ServiceManager {
      * @throws ServiceException if the service is unknown or the registry does not answer
      */
     public ServiceInfo lookup(String serviceId) {
+        requireBlockingAllowed("lookupService");
         long requestId = requests.open();
-        registry.accept(new ServiceLookupMessage(requestId, serviceId));
+        send(requestId, new ServiceLookupMessage(requestId, serviceId));
         ServiceLookupResponseMessage response =
                 requests.await(requestId, ServiceLookupResponseMessage.class, RESPONSE_TIMEOUT_MILLIS);
         if (!response.isFound()) {
@@ -88,6 +97,7 @@ public final class ServiceManager {
      *                          running here, or cannot be started
      */
     public synchronized Server start(String serviceId, ServerCallback callback, Consumer<Server> configure) {
+        requireBlockingAllowed("createService");
         if (running.containsKey(serviceId)) {
             throw new ServiceException("Service " + serviceId + " is already running");
         }
@@ -117,7 +127,7 @@ public final class ServiceManager {
         long requestId = requests.open();
         ServiceStartResponseMessage response;
         try {
-            registry.accept(new ServiceStartedMessage(requestId, serviceId, advertisedHost.get(), port));
+            send(requestId, new ServiceStartedMessage(requestId, serviceId, advertisedHost.get(), port));
             response = requests.await(requestId, ServiceStartResponseMessage.class, RESPONSE_TIMEOUT_MILLIS);
         } catch (RuntimeException e) {
             stopQuietly(server);
@@ -162,10 +172,29 @@ public final class ServiceManager {
      */
     public ServiceClient connect(String serviceId, ServiceClientCallback callback,
             Consumer<ProtocolSettings> configure) {
+        requireBlockingAllowed("connectToService");
         ServiceClient client = new ServiceClient(serviceId, this::lookup, callback,
                 new DataBridgeServiceConnector(configure));
         client.connect();
         return client;
+    }
+
+    // The registry connection is down while the SDK reconnects; callers see that as a ServiceException like any
+    // other unanswered request
+    private void send(long requestId, Message message) {
+        try {
+            registry.accept(message);
+        } catch (RuntimeException e) {
+            requests.cancel(requestId);
+            throw new ServiceException("Cannot reach the registry: " + e.getMessage(), e);
+        }
+    }
+
+    private void requireBlockingAllowed(String method) {
+        if (onRegistryThread.getAsBoolean()) {
+            throw new IllegalStateException(method + " waits for the registry, so it cannot run on the registry "
+                    + "connection's network thread. Call it from another thread.");
+        }
     }
 
     /** Hands a registry response to the request waiting for it. */

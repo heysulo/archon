@@ -46,6 +46,7 @@ public class ServiceManagerTest {
     private final List<FakeServer> servers = new ArrayList<>();
     private ServiceManager manager;
     private boolean refuseStarts;
+    private boolean onRegistryThread;
 
     /** A registry that answers at once, knowing only ORDERS. */
     private final Consumer<Message> registry = message -> {
@@ -68,6 +69,7 @@ public class ServiceManagerTest {
         sent.clear();
         servers.clear();
         refuseStarts = false;
+        onRegistryThread = false;
         manager = owner("OrderApp");
     }
 
@@ -76,6 +78,26 @@ public class ServiceManagerTest {
         ServiceInfo info = manager.lookup("orders");
         Assert.assertEquals(info.definition(), ORDERS);
         Assert.assertEquals(info.primary().orElseThrow().host(), "10.0.0.1");
+    }
+
+    // The registry's answer arrives on that thread, so waiting there would never end
+    @Test
+    public void blockingCallsAreRefusedOnTheRegistryNetworkThread() {
+        onRegistryThread = true;
+        IllegalStateException e = Assert.expectThrows(IllegalStateException.class, () -> manager.lookup("orders"));
+        Assert.assertTrue(e.getMessage().contains("network thread"), e.getMessage());
+        Assert.expectThrows(IllegalStateException.class, () -> manager.start("orders", NO_OP, server -> { }));
+        Assert.assertTrue(sent.isEmpty());
+    }
+
+    // While the SDK reconnects, the registry connection throws on send
+    @Test
+    public void anUnreachableRegistryFailsWithAServiceException() {
+        manager = new ServiceManager("Shop", "OrderApp", message -> {
+            throw new IllegalStateException("Connection unavailable");
+        }, definition -> 9001, (port, callback) -> new FakeServer(port, callback), () -> null, () -> false);
+        ServiceException e = Assert.expectThrows(ServiceException.class, () -> manager.lookup("orders"));
+        Assert.assertTrue(e.getMessage().contains("Cannot reach the registry"), e.getMessage());
     }
 
     @Test
@@ -156,7 +178,7 @@ public class ServiceManagerTest {
                     FakeServer server = new FakeServer(port, callback);
                     servers.add(server);
                     return server;
-                }, () -> "10.0.0.7");
+                }, () -> "10.0.0.7", () -> onRegistryThread);
     }
 
     private <T extends Message> T last(Class<T> type) {

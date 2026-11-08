@@ -5,12 +5,11 @@
         <Bug pattern="MS_EXPOSE_REP"/>
         <Method name="getInstance"/>
     </Match>
-    <!-- Known design debt: a termination from the registry ends the host process. Replacing this with a callback
-         changes SDK behaviour, so it needs a deliberate decision. -->
+    <!-- The default reaction to a termination from the registry ends the host process, so its orchestrator starts
+         a fresh instance. Applications can override ArchonCallback.onTerminated to do otherwise. -->
     <Match>
         <Bug pattern="DM_EXIT"/>
-        <Class name="dev.heysulo.archon.sdk.registry.PrimaryRegistry"/>
-        <Method name="onMessage"/>
+        <Class name="dev.heysulo.archon.sdk.ArchonTermination"/>
     </Match>
     <!-- A primary that loses the vote against another primary must stop so only one keeps serving. Its
          orchestrator restarts it, and it rejoins as a mirror. -->

@@ -34,6 +34,11 @@ public final class PendingRequests {
         return future != null && future.complete(response);
     }
 
+    /** Forgets a request whose message could not be sent. */
+    public void cancel(long requestId) {
+        pending.remove(requestId);
+    }
+
     public <T extends Message> T await(long requestId, Class<T> type, long timeoutMillis) {
         CompletableFuture<Message> future = pending.get(requestId);
         if (future == null) {

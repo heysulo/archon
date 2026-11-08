@@ -14,18 +14,20 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.function.ToLongFunction;
 
 public class RegistryLookupService implements ClientCallback {
-    private static final long LOOKUP_TIMEOUT_MILLIS = 10_000;
+    static final long NOT_PRIMARY = -1;
+    private static final long LOOKUP_TIMEOUT_MILLIS = 5_000;
     private static final long LOOKUP_POLL_MILLIS = 100;
     private static final Logger LOGGER = LoggerFactory.getLogger(RegistryLookupService.class);
     private static RegistryLookupService instance;
     private final EventLoopGroup eventLoopGroup =
             new NioEventLoopGroup(1, new DefaultThreadFactory("registry-lookup-worker", true));
-    private volatile Boolean primaryRegistryFound = null;
-    // The newest leadership term seen. A primary from an older term has been replaced and is about to terminate.
-    private volatile long highestTerm = 0;
+    // The answer to the lookup in progress: the responder's term if it is primary, NOT_PRIMARY otherwise
+    private volatile Long answer = null;
 
     private RegistryLookupService() {
     }
@@ -41,27 +43,54 @@ public class RegistryLookupService implements ClientCallback {
      * Returns the location of the primary registry, or {@code null} if none could be found.
      */
     public String search() {
-        for (String registryLocation : RegistryConstants.getRegistryLocations()) {
-            if (isPrimaryRegistry(registryLocation)) {
-                LOGGER.info("Primary registry found at {}", registryLocation);
-                return registryLocation;
-            }
+        String location = choosePrimary(RegistryConstants.getRegistryLocations(), this::primaryTerm);
+        if (location != null) {
+            LOGGER.info("Primary registry found at {}", location);
         }
-        return null;
+        return location;
     }
 
-    private boolean isPrimaryRegistry(String registryLocation) {
+    /**
+     * Asks every registry and picks the primary. Two can claim to be primary for a short while, when a partitioned
+     * primary has not yet been voted out, so the newest term wins. A single primary is always accepted, whatever its
+     * term: terms live only in the registries' memory, so a cluster restarted from scratch counts from 1 again, and
+     * insisting on a term at least as new as one seen before would ignore it forever.
+     *
+     * @param primaryTerm a registry's term if it is primary, or {@link #NOT_PRIMARY}
+     */
+    static String choosePrimary(List<String> locations, ToLongFunction<String> primaryTerm) {
+        String best = null;
+        long bestTerm = NOT_PRIMARY;
+        for (String location : locations) {
+            long term = primaryTerm.applyAsLong(location);
+            if (term == NOT_PRIMARY) {
+                continue;
+            }
+            if (best != null) {
+                LOGGER.warn("Both {} (term {}) and {} (term {}) claim to be primary. Following the newer term", best,
+                        bestTerm, location, term);
+            }
+            if (best == null || term > bestTerm) {
+                best = location;
+                bestTerm = term;
+            }
+        }
+        return best;
+    }
+
+    private long primaryTerm(String registryLocation) {
         Client lookupConnection = new Client(registryLocation, RegistryConstants.PORT, this, eventLoopGroup);
+        lookupConnection.settings().setConnectTimeout(RegistryConstants.CONNECT_TIMEOUT);
         try {
-            primaryRegistryFound = null;
+            answer = null;
             lookupConnection.connect();
             lookupConnection.send(new PrimaryRegistryLookupMessage());
-            LOGGER.info("Waiting for registry lookup response from {}", registryLocation);
-            Utils.waitForCondition(() -> primaryRegistryFound != null, LOOKUP_TIMEOUT_MILLIS, LOOKUP_POLL_MILLIS);
-            if (!primaryRegistryFound) {
-                LOGGER.info("{} is not the primary registry", registryLocation);
+            LOGGER.debug("Waiting for registry lookup response from {}", registryLocation);
+            Utils.waitForCondition(() -> answer != null, LOOKUP_TIMEOUT_MILLIS, LOOKUP_POLL_MILLIS);
+            if (answer == NOT_PRIMARY) {
+                LOGGER.debug("{} is not the primary registry", registryLocation);
             }
-            return primaryRegistryFound;
+            return answer;
         } catch (TimeoutException e) {
             LOGGER.warn("Registry lookup response timed out: {}", registryLocation);
         } catch (InterruptedException e) {
@@ -72,14 +101,15 @@ public class RegistryLookupService implements ClientCallback {
         } finally {
             close(lookupConnection);
         }
-        return false;
+        return NOT_PRIMARY;
     }
 
-    /** Records a leadership term the application has seen, keeping the highest. */
-    public synchronized void observeTerm(long term) {
-        if (term > highestTerm) {
-            highestTerm = term;
-        }
+    /**
+     * Records a term reported by the registry. Lookups compare the terms registries answer with directly, so this
+     * is informational.
+     */
+    public void observeTerm(long term) {
+        LOGGER.debug("Registry reported term {}", term);
     }
 
     private void close(Client lookupConnection) {
@@ -92,27 +122,18 @@ public class RegistryLookupService implements ClientCallback {
 
     @Override
     public void onConnect(Client client) {
-        LOGGER.info("Connected to registry at {}", client.getRemoteAddress());
+        LOGGER.debug("Connected to registry at {}", client.getRemoteAddress());
     }
 
     @Override
     public void onDisconnect(Client client) {
-        LOGGER.info("Disconnected from registry at {}", client.getRemoteAddress());
+        LOGGER.debug("Disconnected from registry at {}", client.getRemoteAddress());
     }
 
     @Override
     public void onMessage(Client client, Message message) {
-        if (message instanceof PrimaryRegistryLookupResponseMessage lookupResponseMessage) {
-            boolean primary = lookupResponseMessage.getRank() == RegistryProtocol.RANK_PRIMARY;
-            if (primary && lookupResponseMessage.getTerm() < highestTerm) {
-                LOGGER.warn("Ignoring primary at {}: its term {} is older than term {}", client.getRemoteAddress(),
-                        lookupResponseMessage.getTerm(), highestTerm);
-                primary = false;
-            }
-            if (primary) {
-                observeTerm(lookupResponseMessage.getTerm());
-            }
-            primaryRegistryFound = primary;
+        if (message instanceof PrimaryRegistryLookupResponseMessage lookup) {
+            answer = lookup.getRank() == RegistryProtocol.RANK_PRIMARY ? lookup.getTerm() : NOT_PRIMARY;
         }
     }
 

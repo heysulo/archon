@@ -17,6 +17,10 @@ import dev.heysulo.databridge.core.server.callback.ServerCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.DefaultThreadFactory;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
@@ -35,8 +39,16 @@ public class ArchonInterface {
     private volatile int rank;
     private String groupName;
     private String applicationName;
-    private ArchonCallback callback;
     private volatile ServiceManager services;
+    private volatile RegistryEvents events;
+    private volatile Reconnector reconnector;
+    private volatile boolean terminated;
+    // Rank and termination callbacks, one at a time and in order, never on a network thread
+    private final ScheduledExecutorService callbackThread =
+            Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("archon-callbacks", true));
+    // Finding and reconnecting to the primary registry, which blocks
+    private final ScheduledExecutorService reconnectThread =
+            Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("archon-reconnect", true));
 
     private ArchonInterface() {
     }
@@ -52,8 +64,13 @@ public class ArchonInterface {
         LOGGER.info("Initializing ArchonInterface");
         this.groupName = groupName;
         this.applicationName = applicationName;
-        this.callback = callback;
-        this.services = new ServiceManager(groupName, applicationName, message -> primaryRegistry.sendMessage(message));
+        this.events = new RegistryEvents(callback, this::confirmRank, callbackThread);
+        this.services = new ServiceManager(groupName, applicationName, message -> primaryRegistry.sendMessage(message),
+                this::isRegistryNetworkThread);
+        // Created first, so a drop straight after connecting is not missed
+        this.reconnector = new Reconnector(() -> RegistryLookupService.getInstance().search(),
+                location -> primaryRegistry.connect(location), this::restoreRegistration,
+                () -> primaryRegistry.isConnected(), reconnectThread, PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
         setupPrimaryRegistryConnection();
         registerApplication();
         return rank;
@@ -71,17 +88,40 @@ public class ArchonInterface {
         primaryRegistry.connect(primaryRegistryLocation);
     }
 
-    public void reconnect() {
-        LOGGER.info("[Reconnect] Looking for primary registry");
-        primaryRegistryLocation = waitForPrimaryRegistry(RegistryLookupService.getInstance());
-        if (primaryRegistryLocation == null) {
-            LOGGER.warn("[Reconnect] Interrupted while looking for primary registry");
-            return;
+    /** Called on a network thread when the registry connection drops. Reconnecting happens elsewhere. */
+    public void onRegistryConnectionLost() {
+        Reconnector current = reconnector;
+        if (current != null && !terminated) {
+            current.connectionLost();
         }
-        LOGGER.info("[Reconnect] Found primary registry at {}", primaryRegistryLocation);
-        primaryRegistry.connect(primaryRegistryLocation);
+    }
+
+    // Runs on the reconnect thread once connected to a primary registry again
+    private void restoreRegistration() {
         primaryRegistry.sendMessage(createRegistrationMessage(rank));
         services.announceAll();
+    }
+
+    /**
+     * Called on a network thread when the registry terminates this instance. Stops talking to the registry for good,
+     * then tells the application.
+     */
+    public void onTerminated(String reason) {
+        terminated = true;
+        Reconnector current = reconnector;
+        if (current != null) {
+            current.stop();
+        }
+        primaryRegistry.disconnect();
+        events.terminated(reason);
+    }
+
+    public boolean isTerminated() {
+        return terminated;
+    }
+
+    private boolean isRegistryNetworkThread() {
+        return primaryRegistry != null && primaryRegistry.isNetworkThread();
     }
 
     /**
@@ -138,15 +178,35 @@ public class ArchonInterface {
         return message;
     }
 
+    /** Called on a network thread. The application hears about it on the callback thread. */
     public void onRankUpdateMessage(int newRank) {
-        rankUpdateAvailable = true;
         LOGGER.info("Received rank update. {} -> {}", rank, newRank);
         rank = newRank;
-        callback.onRankUpdateMessage(newRank);
+        rankUpdateAvailable = true;
+        events.rankChanged(newRank);
     }
 
+    /**
+     * Confirms a rank to the registry.
+     *
+     * @deprecated The SDK confirms every rank itself once {@link ArchonCallback#onRankUpdateMessage} returns.
+     *             Calling this as well is harmless.
+     */
+    @Deprecated
     public void acknowledgeRank(int rank) {
-        primaryRegistry.sendMessage(new ApplicationRankUpdate(rank));
+        confirmRank(rank);
+    }
+
+    private void confirmRank(int confirmedRank) {
+        if (terminated) {
+            return;
+        }
+        try {
+            primaryRegistry.sendMessage(new ApplicationRankUpdate(confirmedRank));
+        } catch (RuntimeException e) {
+            // Disconnected. Re-registering after the reconnect confirms the rank again.
+            LOGGER.warn("Could not confirm rank {}: {}", confirmedRank, e.getMessage());
+        }
     }
 
     /**

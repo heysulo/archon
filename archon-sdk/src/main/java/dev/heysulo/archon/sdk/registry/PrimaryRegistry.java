@@ -12,6 +12,7 @@ import dev.heysulo.archon.sdk.exception.PrimaryRegistryConnectionFailure;
 import dev.heysulo.archon.sdk.utils.Utils;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.client.callback.ClientCallback;
+import dev.heysulo.databridge.core.common.EventLoops;
 import dev.heysulo.databridge.core.common.Message;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -26,7 +27,7 @@ public class PrimaryRegistry implements ClientCallback {
     private static final long CONNECT_TIMEOUT_MILLIS = 5_000;
     private static final long CONNECT_POLL_MILLIS = 100;
     private static PrimaryRegistry instance;
-    private Client connection;
+    private volatile Client connection;
     private final EventLoopGroup eventLoopGroup =
             new NioEventLoopGroup(new DefaultThreadFactory("primary-registry-worker-group"));
     private volatile boolean connected = false;
@@ -45,8 +46,11 @@ public class PrimaryRegistry implements ClientCallback {
     }
 
     public void connect(String host) {
-        connection = new Client(host, RegistryConstants.PORT, this, eventLoopGroup);
-        connection.settings().setHeartbeatInterval(RegistryConstants.HEARTBEAT_INTERVAL);
+        connected = false;
+        Client client = new Client(host, RegistryConstants.PORT, this, eventLoopGroup);
+        client.settings().setHeartbeatInterval(RegistryConstants.HEARTBEAT_INTERVAL);
+        client.settings().setConnectTimeout(RegistryConstants.CONNECT_TIMEOUT);
+        connection = client;
         try {
             LOGGER.info("Connecting primary registry at {}", host);
             connection.connect();
@@ -62,20 +66,52 @@ public class PrimaryRegistry implements ClientCallback {
 
     @Override
     public void onConnect(Client client) {
+        if (client != connection) {
+            return;
+        }
         LOGGER.info("Connected to primary registry at {}", client.getRemoteAddress());
         connected = true;
     }
 
     @Override
     public void onDisconnect(Client client) {
+        // A connection already replaced by a reconnect says nothing about the current one
+        if (client != connection) {
+            return;
+        }
         LOGGER.warn("Disconnected from primary registry at {}", client.getRemoteAddress());
         connected = false;
-        archonInterface.reconnect();
+        archonInterface.onRegistryConnectionLost();
+    }
+
+    public boolean isConnected() {
+        return connected;
+    }
+
+    /** Whether the calling thread is one of this connection's network threads, which must never block. */
+    public boolean isNetworkThread() {
+        return EventLoops.isCurrentThreadIn(eventLoopGroup);
+    }
+
+    /** Closes the connection without reconnecting, as after a termination. */
+    public void disconnect() {
+        Client client = connection;
+        if (client == null) {
+            return;
+        }
+        try {
+            client.disconnect();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
     public void onMessage(Client client, Message message) {
-        LOGGER.info("Received message from primary registry. {}", message.getClass().getName());
+        if (client != connection) {
+            return;
+        }
+        LOGGER.debug("Received {} from primary registry", message.getClass().getSimpleName());
         if (message instanceof ApplicationRegistrationResponseMessage rankUpdateMessage) {
             this.authenticationToken = rankUpdateMessage.getAuthenticationToken();
             RegistryLookupService.getInstance().observeTerm(rankUpdateMessage.getTerm());
@@ -87,7 +123,7 @@ public class PrimaryRegistry implements ClientCallback {
         } else if (message instanceof ApplicationTerminationMessage terminationMessage) {
             LOGGER.error("Received termination message from primary registry. Reason: {}",
                     terminationMessage.getReason());
-            System.exit(1);
+            archonInterface.onTerminated(terminationMessage.getReason());
         }
     }
 
