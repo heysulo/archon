@@ -3,6 +3,8 @@ package dev.heysulo.archon.dictionary.sdk.messages;
 import dev.heysulo.databridge.core.common.Message;
 
 public abstract class AuthenticatedMessage implements Message {
+    private static final long serialVersionUID = -3619294116473605912L;
+
     String authenticationToken = null;
 
     public String getAuthenticationToken() {

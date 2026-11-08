@@ -82,4 +82,17 @@ public class LeaderElectionPolicyTest {
                 LeaderElectionPolicy.decide(high, List.of(low))).stream().filter(Decision.LEAD::equals).count();
         Assert.assertEquals(leaders, 1L);
     }
+
+    @Test
+    public void noOneLeadsWithoutAMajorityInView() {
+        Assert.assertEquals(LeaderElectionPolicy.decide(ranked(2, "a"), List.of(), 2), Decision.WAIT);
+        Assert.assertEquals(LeaderElectionPolicy.decide(ranked(2, "a"), List.of(ranked(3, "b")), 2), Decision.LEAD);
+        Assert.assertEquals(LeaderElectionPolicy.decide(fresh(EARLY, "a"), List.of(), 1), Decision.LEAD);
+    }
+
+    @Test
+    public void followingAPrimaryNeedsNoMajority() {
+        Assert.assertEquals(LeaderElectionPolicy.decide(fresh(LATE, "a"), List.of(ranked(1, "b")), 3),
+                Decision.FOLLOW_PRIMARY);
+    }
 }

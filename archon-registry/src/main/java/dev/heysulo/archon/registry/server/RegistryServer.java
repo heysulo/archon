@@ -14,7 +14,10 @@ import dev.heysulo.archon.registry.constants.ApplicationTermination;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderElectionMessage;
 import dev.heysulo.archon.registry.messages.leaderelection.LeaderStatusMessage;
+import dev.heysulo.archon.registry.messages.leaderelection.PrimaryStanding;
 import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationResponse;
+import dev.heysulo.archon.registry.messages.leaderelection.VoteRequest;
+import dev.heysulo.archon.registry.messages.leaderelection.VoteResponse;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
 import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.Message;
@@ -30,6 +33,8 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static dev.heysulo.archon.registry.constants.Constants.APPLICATION_GROUP_NAME;
@@ -39,6 +44,8 @@ import static dev.heysulo.archon.registry.constants.Constants.RANK_MIRROR;
 import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
 import static dev.heysulo.archon.registry.constants.Constants.RANK_UNKNOWN;
 import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_FAILOVER_CONNECTION_ATTEMPTS;
+import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_LOSER_EXIT_DELAY;
+import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_PRIMARY_SCAN_INTERVAL;
 
 public class RegistryServer implements ServerCallback {
     private static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME,
@@ -53,7 +60,12 @@ public class RegistryServer implements ServerCallback {
     private final AtomicBoolean failoverInProgress = new AtomicBoolean(false);
     private final ExecutorService failoverExecutor = Executors.newSingleThreadExecutor(
             new DefaultThreadFactory("registry-failover", true));
+    private final ScheduledExecutorService primaryScanExecutor = Executors.newSingleThreadScheduledExecutor(
+            new DefaultThreadFactory("registry-primary-scan", true));
+    private final AtomicBoolean lostToRival = new AtomicBoolean(false);
     private final ApplicationManager applicationManager = ApplicationManager.getInstance();
+    // The highest leadership term this registry knows was won. Only a won election raises it.
+    private static volatile long term = 0;
 
     public static synchronized RegistryServer getInstance() {
         if (instance == null) {
@@ -82,12 +94,20 @@ public class RegistryServer implements ServerCallback {
     public void onMessage(Server server, Connection connection, Message message) {
         LOGGER.info("Received message from {} type {}", connection.getRemoteAddress(),
                 message.getClass().getSimpleName());
-        if (message instanceof LeaderElectionMessage) {
+        if (message instanceof VoteRequest voteRequest) {
+            handleVoteRequest(connection, voteRequest);
+            return;
+        } else if (message instanceof PrimaryStanding rival) {
+            handleRivalStanding(connection, rival);
+            return;
+        } else if (message instanceof LeaderElectionMessage) {
             handleLeaderElectionMessage(connection, (LeaderElectionMessage) message);
             return;
         } else if (message instanceof PrimaryRegistryLookupMessage) {
             LOGGER.info("Received PrimaryRegistryLookupMessage from {}", connection.getRemoteAddress());
-            connection.send(new PrimaryRegistryLookupResponseMessage(getRank()));
+            PrimaryRegistryLookupResponseMessage response = new PrimaryRegistryLookupResponseMessage(getRank());
+            response.setTerm(getTerm());
+            connection.send(response);
             return;
         }
 
@@ -164,10 +184,73 @@ public class RegistryServer implements ServerCallback {
         connection.send(new ApplicationTerminationMessage(reason));
     }
 
-    private void handleLeaderElectionMessage(Connection connection, LeaderElectionMessage message) {
-        connection.send(new LeaderStatusMessage(getRank(), Constants.getMyAddress(), Constants.APPLICATION_START_TIME));
-        if (getRank() != RANK_PRIMARY) {
+    private void handleVoteRequest(Connection connection, VoteRequest request) {
+        // A primary never backs a rival. Two primaries are settled by comparing standings once they meet.
+        boolean granted = getRank() != RANK_PRIMARY
+                && LeaderElectorClient.getInstance().considerVote(request, isPrimaryKnown());
+        LOGGER.info("{} vote for {} in term {}", granted ? "Granted" : "Refused", request.getAddress(),
+                request.getTerm());
+        connection.send(new VoteResponse(request.getTerm(), getTerm(), granted));
+    }
+
+    private static boolean isPrimaryKnown() {
+        return primaryRegistry.isConnected();
+    }
+
+    private void handleRivalStanding(Connection connection, PrimaryStanding rival) {
+        if (getRank() != RANK_PRIMARY || rival.isReply()) {
             return;
+        }
+        PrimaryStanding mine = currentStanding(true);
+        connection.send(mine);
+        resolveRivalPrimary(mine, rival);
+    }
+
+    private void handleRivalReply(PrimaryStanding rival) {
+        if (getRank() == RANK_PRIMARY) {
+            resolveRivalPrimary(currentStanding(false), rival);
+        }
+    }
+
+    PrimaryStanding currentStanding(boolean reply) {
+        return new PrimaryStanding(Constants.getMyAddress(), Constants.APPLICATION_START_TIME, getTerm(),
+                countSupporters(), reply);
+    }
+
+    /**
+     * Keeps exactly one of two primaries. The loser terminates, and its applications re-register with the winner.
+     * The winner moves past the loser's term, so applications that followed the loser accept it.
+     */
+    synchronized void resolveRivalPrimary(PrimaryStanding mine, PrimaryStanding rival) {
+        if (rival.beats(mine)) {
+            if (lostToRival.compareAndSet(false, true)) {
+                String reason = String.format("Lost the vote to primary %s. This primary had %s", rival, mine);
+                LOGGER.error("{}. Terminating in {} ms", reason, REGISTRY_LOSER_EXIT_DELAY.toMillis());
+                // The delay lets this standing reach the winner, which may need it to move past this term
+                primaryScanExecutor.schedule(() -> RegistryTermination.terminate(reason),
+                        REGISTRY_LOSER_EXIT_DELAY.toMillis(), TimeUnit.MILLISECONDS);
+            }
+            return;
+        }
+        LOGGER.warn("Won the vote against primary {}. This primary has {}", rival, mine);
+        if (rival.getTerm() >= getTerm()) {
+            setTerm(rival.getTerm() + 1);
+        }
+    }
+
+    private void handleLeaderElectionMessage(Connection connection, LeaderElectionMessage message) {
+        connection.send(new LeaderStatusMessage(getRank(), getTerm(), Constants.getMyAddress(),
+                Constants.APPLICATION_START_TIME));
+        if (getRank() != RANK_PRIMARY) {
+            observeTerm(message.getTerm());
+            return;
+        }
+        if (message.getTerm() > getTerm()) {
+            // Another primary held that term and is gone or will lose the vote. Applications that followed it
+            // ignore primaries with an older term, so this one moves past it.
+            LOGGER.warn("{} knows of term {}, newer than this primary's term {}", message.getAddress(),
+                    message.getTerm(), getTerm());
+            setTerm(message.getTerm() + 1);
         }
         // Mirrors joining at the same time arrive on different event loops; the lock keeps their ranks distinct.
         ApplicationManager.withNamespaceLock(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, () -> {
@@ -216,6 +299,22 @@ public class RegistryServer implements ServerCallback {
         applicationRegistry.setRank(newRank);
     }
 
+    public static long getTerm() {
+        return term;
+    }
+
+    public static synchronized void setTerm(long newTerm) {
+        LOGGER.info("Updating term from {} to {}", term, newTerm);
+        term = newTerm;
+    }
+
+    /** Records a term won elsewhere, keeping the highest one seen. */
+    public static synchronized void observeTerm(long seenTerm) {
+        if (seenTerm > term) {
+            setTerm(seenTerm);
+        }
+    }
+
     public static int getRank() {
         return applicationRegistry.getRank();
     }
@@ -243,6 +342,26 @@ public class RegistryServer implements ServerCallback {
         }
         applicationRegistry.setRunLevel(RunLevel.RUNNING);
         retireDisconnectedMirrorRecords();
+        scanForOtherPrimaries();
+    }
+
+    // A primary that loses its mirrors keeps serving. If it was partitioned off, the other side may elect its own
+    // primary, so it keeps looking for the other registries and settles any rival by vote once they meet.
+    private void scanForOtherPrimaries() {
+        PrimaryScanner scanner = new PrimaryScanner(() -> currentStanding(false), this::handleRivalReply);
+        long intervalMillis = REGISTRY_PRIMARY_SCAN_INTERVAL.toMillis();
+        primaryScanExecutor.scheduleWithFixedDelay(scanner::scan, 0, intervalMillis, TimeUnit.MILLISECONDS);
+    }
+
+    // Every mirror backs the primary it follows, so these are this primary's votes, its own included
+    private int countSupporters() {
+        long connectedMirrors = findRegistryInstances()
+                .stream()
+                .filter(app -> app.getRank() != RANK_PRIMARY)
+                .filter(Application::isRunning)
+                .filter(Application::isConnected)
+                .count();
+        return (int) connectedMirrors + 1;
     }
 
     // A promoted mirror inherits records of peers it has no connection to. They rejoin through election.

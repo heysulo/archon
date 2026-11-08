@@ -24,6 +24,8 @@ public class RegistryLookupService implements ClientCallback {
     private final EventLoopGroup eventLoopGroup =
             new NioEventLoopGroup(1, new DefaultThreadFactory("registry-lookup-worker", true));
     private volatile Boolean primaryRegistryFound = null;
+    // The newest leadership term seen. A primary from an older term has been replaced and is about to terminate.
+    private volatile long highestTerm = 0;
 
     private RegistryLookupService() {
     }
@@ -73,6 +75,13 @@ public class RegistryLookupService implements ClientCallback {
         return false;
     }
 
+    /** Records a leadership term the application has seen, keeping the highest. */
+    public synchronized void observeTerm(long term) {
+        if (term > highestTerm) {
+            highestTerm = term;
+        }
+    }
+
     private void close(Client lookupConnection) {
         try {
             lookupConnection.stop();
@@ -94,7 +103,16 @@ public class RegistryLookupService implements ClientCallback {
     @Override
     public void onMessage(Client client, Message message) {
         if (message instanceof PrimaryRegistryLookupResponseMessage lookupResponseMessage) {
-            primaryRegistryFound = lookupResponseMessage.getRank() == RegistryProtocol.RANK_PRIMARY;
+            boolean primary = lookupResponseMessage.getRank() == RegistryProtocol.RANK_PRIMARY;
+            if (primary && lookupResponseMessage.getTerm() < highestTerm) {
+                LOGGER.warn("Ignoring primary at {}: its term {} is older than term {}", client.getRemoteAddress(),
+                        lookupResponseMessage.getTerm(), highestTerm);
+                primary = false;
+            }
+            if (primary) {
+                observeTerm(lookupResponseMessage.getTerm());
+            }
+            primaryRegistryFound = primary;
         }
     }
 

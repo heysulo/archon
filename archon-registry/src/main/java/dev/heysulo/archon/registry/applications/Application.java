@@ -3,7 +3,7 @@ package dev.heysulo.archon.registry.applications;
 import dev.heysulo.archon.dictionary.sdk.enums.ProcessState;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
-import dev.heysulo.archon.dictionary.sdk.messages.AuthenticatedMessage;
+import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationResponseMessage;
 import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
@@ -101,9 +101,10 @@ public class Application implements ConnectionCallback {
     public void handleRegistration(Connection connection) {
         setConnection(connection);
         setRunLevel(RunLevel.STARTING);
-        AuthenticatedMessage registrationResponse = isRegistryInstance()
+        ApplicationRegistrationResponseMessage registrationResponse = isRegistryInstance()
                 ? createRegistryRegistrationResponse(this)
                 : createRegistrationResponse(this);
+        registrationResponse.setTerm(RegistryServer.getTerm());
         this.authenticationToken = authenticationManager.generateSecureToken();
         registrationResponse.setAuthenticationToken(this.authenticationToken);
         send(registrationResponse);

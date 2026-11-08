@@ -19,6 +19,7 @@ import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
  *     <li>A fresh instance never leads while an established mirror is alive.</li>
  *     <li>When every instance is fresh, the oldest leads.</li>
  * </ol>
+ * A winner still needs a majority of the configured registries in view, and then a majority of votes.
  */
 public final class LeaderElectionPolicy {
 
@@ -46,6 +47,14 @@ public final class LeaderElectionPolicy {
     }
 
     private LeaderElectionPolicy() {
+    }
+
+    /**
+     * Applies the rules, leading only when this instance and its peers make up a majority of all registries.
+     */
+    public static Decision decide(Candidate self, Collection<Candidate> peers, int quorum) {
+        Decision decision = decide(self, peers);
+        return decision == Decision.LEAD && peers.size() + 1 < quorum ? Decision.WAIT : decision;
     }
 
     public static Decision decide(Candidate self, Collection<Candidate> peers) {

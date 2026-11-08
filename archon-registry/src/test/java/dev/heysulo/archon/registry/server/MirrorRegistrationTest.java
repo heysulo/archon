@@ -33,7 +33,8 @@ public class MirrorRegistrationTest {
     @Test
     public void mirrorIsNeverGivenThePrimaryRank() {
         FakeConnection mirror = new FakeConnection();
-        server.onMessage(null, mirror, new LeaderElectionMessage(RANK_FORECASTED_PRIMARY, "10.0.0.2", Instant.now()));
+        server.onMessage(null, mirror,
+                new LeaderElectionMessage(RANK_FORECASTED_PRIMARY, 0, "10.0.0.2", Instant.now()));
 
         Assert.assertTrue(mirror.last(RegistryRegistrationResponse.class).getRank() >= RANK_MIRROR);
     }
@@ -66,6 +67,6 @@ public class MirrorRegistrationTest {
             throw new IllegalStateException(e);
         }
         server.onMessage(null, connection,
-                new LeaderElectionMessage(RANK_FORECASTED_PRIMARY, "10.0.0.1", Instant.now()));
+                new LeaderElectionMessage(RANK_FORECASTED_PRIMARY, 0, "10.0.0.1", Instant.now()));
     }
 }

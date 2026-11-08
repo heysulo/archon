@@ -4,6 +4,8 @@ import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
 
 public class ApplicationSyncMessage extends SyncMessage {
+    private static final long serialVersionUID = 7753589028562964527L;
+
     String group;
     String name;
     int rank;

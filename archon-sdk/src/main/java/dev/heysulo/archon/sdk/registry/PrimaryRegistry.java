@@ -76,6 +76,7 @@ public class PrimaryRegistry implements ClientCallback {
         LOGGER.info("Received message from primary registry. {}", message.getClass().getName());
         if (message instanceof ApplicationRegistrationResponseMessage rankUpdateMessage) {
             this.authenticationToken = rankUpdateMessage.getAuthenticationToken();
+            RegistryLookupService.getInstance().observeTerm(rankUpdateMessage.getTerm());
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
         } else if (message instanceof ApplicationRankUpdate rankUpdateMessage) {
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());

@@ -3,6 +3,8 @@ package dev.heysulo.archon.dictionary.sdk.messages;
 import dev.heysulo.databridge.core.common.Message;
 
 public class ApplicationRegistrationMessage extends AuthenticatedMessage {
+    private static final long serialVersionUID = 4082841948653972696L;
+
     String applicationName;
     String groupName;
     String ipAddress;

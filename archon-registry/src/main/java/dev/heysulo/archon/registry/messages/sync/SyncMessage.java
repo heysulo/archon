@@ -5,6 +5,8 @@ import dev.heysulo.databridge.core.common.Message;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class SyncMessage implements Message {
+    private static final long serialVersionUID = -8811457644881017964L;
+
     private static final AtomicLong SEQUENCE_GENERATOR = new AtomicLong(0);
 
     private final long sequenceId;
