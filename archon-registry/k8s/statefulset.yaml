@@ -52,7 +52,9 @@ spec:
             MY_IP=$(echo $ARCHON_REGISTRY_LOCATIONS | awk -F'|' -v idx=$((ORDINAL+1)) '{print $idx}')
             export MY_EXTERNAL_IP=$MY_IP
             echo "Pod configured with External IP: $MY_EXTERNAL_IP"
-            java -jar app.jar
+            # exec: Java replaces the shell as process 1, so it receives the SIGTERM Kubernetes sends on stop.
+            # Without it the shell ignores the signal and the pod is killed only after the grace period.
+            exec java -jar app.jar
         ports:
         - containerPort: 8080
           name: web
