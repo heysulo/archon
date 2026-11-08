@@ -23,4 +23,18 @@
         <Class name="dev.heysulo.archon.portal.PortalApplication"/>
         <Method name="register"/>
     </Match>
+    <!-- The portal's services share one connection pool and one store by design; they are wired once at start. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Or>
+            <Class name="dev.heysulo.archon.portal.auth.AuthService"/>
+            <Class name="dev.heysulo.archon.portal.auth.AuthStore"/>
+        </Or>
+        <Method name="&lt;init&gt;"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+        <Class name="dev.heysulo.archon.portal.db.PortalDatabase"/>
+        <Method name="dataSource"/>
+    </Match>
 </FindBugsFilter>

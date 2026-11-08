@@ -7,7 +7,7 @@ export function NotFoundPage() {
       <Title order={2}>Page not found</Title>
       <Text c="dimmed">There is nothing at this address.</Text>
       <Button component={Link} to="/processes" variant="light">
-        Go to processes
+        Go to the start page
       </Button>
     </Stack>
   );

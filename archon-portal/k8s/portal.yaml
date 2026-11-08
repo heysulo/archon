@@ -24,6 +24,19 @@ spec:
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
         - name: PORTAL_PORT
           value: "8080"
+        # Users and sessions live in the archon schema, through the same login as the registry
+        - name: ARCHON_DB_URL
+          value: "jdbc:mysql://mysql.heysulo.internal:3306/archon"
+        - name: ARCHON_DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: archon-db
+              key: username
+        - name: ARCHON_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: archon-db
+              key: password
         # Where this replica runs, shown on the portal
         - name: ARCHON_ADVERTISED_HOST
           valueFrom:
@@ -49,7 +62,8 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
 ---
-# Read-only and without a login: reachable by anyone who can reach 10.21.3.204
+# Reachable by anyone who can reach 10.21.3.204; every page with data needs a portal sign-in.
+# Served over plain HTTP: put TLS in front before using it beyond a trusted network.
 apiVersion: v1
 kind: Service
 metadata:

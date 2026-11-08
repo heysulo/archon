@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { UNAUTHORIZED_EVENT } from "./http";
 import type { ProcessSnapshot } from "./types";
 
 /**
@@ -47,8 +48,15 @@ export function ProcessStreamProvider({ children, url = "/api/events", createSou
     const onError = () =>
       setState((previous) => ({ ...previous, status: "reconnecting", error: "Lost the connection to the portal" }));
 
+    // The portal ends the stream when the session does: signed out, expired, or the user was disabled
+    const onSignedOut = () => {
+      source.close();
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    };
+
     source.addEventListener("snapshot", onSnapshot as EventListener);
     source.addEventListener("offline", onOffline as EventListener);
+    source.addEventListener("signedout", onSignedOut);
     source.addEventListener("error", onError);
     return () => source.close();
   }, [url, createSource]);

@@ -1,11 +1,21 @@
 import { ActionIcon, AppShell, Burger, Group, NavLink, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconMoon, IconServer2, IconSun } from "@tabler/icons-react";
+import { IconMoon, IconServer2, IconSun, IconUsers } from "@tabler/icons-react";
 import { Link, Outlet, useLocation } from "react-router";
+import { ProcessStreamProvider } from "../api/processStream";
+import { useAuth } from "../auth/AuthProvider";
+import { PERMISSIONS, type PermissionKey } from "../auth/permissions";
+import { AccountMenu } from "./AccountMenu";
 import { LiveStatus } from "./LiveStatus";
 
-/** Every page, in the navigation. A new feature adds a route in router.tsx and an entry here. */
-const PAGES = [{ path: "/processes", label: "Processes", icon: IconServer2 }];
+/**
+ * Every page, in the navigation, with the permission it needs. A new feature adds a route in router.tsx and an
+ * entry here; users only see entries they are allowed to open.
+ */
+const PAGES: { path: string; label: string; icon: typeof IconServer2; permission: PermissionKey }[] = [
+  { path: "/processes", label: "Processes", icon: IconServer2, permission: PERMISSIONS.processesView },
+  { path: "/users", label: "Users", icon: IconUsers, permission: PERMISSIONS.usersManage },
+];
 
 function ColorSchemeToggle() {
   const { setColorScheme } = useMantineColorScheme();
@@ -24,8 +34,23 @@ function ColorSchemeToggle() {
 }
 
 export function AppLayout() {
+  const { can } = useAuth();
+  const viewsProcesses = can(PERMISSIONS.processesView);
+  // The live process stream needs a session allowed to see processes; open it only then
+  return viewsProcesses ? (
+    <ProcessStreamProvider>
+      <Shell showLiveStatus />
+    </ProcessStreamProvider>
+  ) : (
+    <Shell showLiveStatus={false} />
+  );
+}
+
+function Shell({ showLiveStatus }: { showLiveStatus: boolean }) {
+  const { can } = useAuth();
   const [opened, { toggle, close }] = useDisclosure();
   const location = useLocation();
+  const pages = PAGES.filter((page) => can(page.permission));
 
   return (
     <AppShell
@@ -44,14 +69,15 @@ export function AppLayout() {
             </Group>
           </Group>
           <Group gap="sm">
-            <LiveStatus />
+            {showLiveStatus && <LiveStatus />}
             <ColorSchemeToggle />
+            <AccountMenu />
           </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="xs">
-        {PAGES.map(({ path, label, icon: Icon }) => (
+        {pages.map(({ path, label, icon: Icon }) => (
           <NavLink
             key={path}
             component={Link}
