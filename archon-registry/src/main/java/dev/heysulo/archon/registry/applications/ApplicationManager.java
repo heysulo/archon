@@ -32,11 +32,18 @@ public class ApplicationManager {
         return instance;
     }
 
+    /**
+     * Finds the record for a rank, preferring a running one. Promotion moves an instance to rank 1 while the dead
+     * leader's record keeps it, so a rank can briefly have a stale record next to its live owner.
+     */
     public Application findApplication(String group, String name, int rank) {
-        return findAllApplications(group, name).stream()
+        List<Application> matches = findAllApplications(group, name).stream()
                 .filter(a -> a.getRank() == rank)
+                .toList();
+        return matches.stream()
+                .filter(Application::isRunning)
                 .findFirst()
-                .orElse(null);
+                .orElse(matches.isEmpty() ? null : matches.get(0));
     }
 
     public List<Application> findAllApplications(String group, String name) {
@@ -49,19 +56,26 @@ public class ApplicationManager {
     }
 
     public Application createApplicationWithNextAvailableRank(String group, String name) {
-        int rank = findNextAvailableApplicationRank(group, name);
+        return createApplicationWithNextAvailableRank(group, name, Constants.RANK_PRIMARY);
+    }
+
+    /**
+     * Assigns the lowest free rank that is at least {@code lowestRank}, reusing a retired record for it if one exists.
+     */
+    public Application createApplicationWithNextAvailableRank(String group, String name, int lowestRank) {
+        int rank = findNextAvailableApplicationRank(group, name, lowestRank);
         Application retired = findApplication(group, name, rank);
         return retired != null ? retired : createApplication(group, name, rank);
     }
 
-    private int findNextAvailableApplicationRank(String group, String name) {
+    private int findNextAvailableApplicationRank(String group, String name, int lowestRank) {
         String appDefName = buildApplicationDefinitionName(group, name);
         List<Application> appList = applications.computeIfAbsent(appDefName, k -> new ArrayList<>());
         Set<Integer> existingRanks = appList.stream()
                 .filter(Application::isRunning)
                 .map(Application::getRank)
                 .collect(Collectors.toSet());
-        int candidate = 1;
+        int candidate = lowestRank;
         while (existingRanks.contains(candidate)) {
             candidate++;
         }

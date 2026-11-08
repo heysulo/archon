@@ -118,53 +118,63 @@ public class RegistryServer implements ServerCallback {
         }
     }
 
+    // Registration and re-registration share the namespace lock, so a rank cannot be handed out while an instance
+    // is reclaiming it.
     private void registerNewApplicationInstance(String group, String name, Connection connection) {
-        Application application = applicationManager.createApplicationWithNextAvailableRank(group, name);
-        application.handleRegistration(connection);
+        ApplicationManager.withNamespaceLock(group, name, () -> {
+            Application application = applicationManager.createApplicationWithNextAvailableRank(group, name);
+            application.handleRegistration(connection);
+        });
     }
 
     private void reRegisterApplicationInstance(String group, String name, int rank, String authenticationToken,
             Connection connection) {
-        Application application = applicationManager.findApplication(group, name, rank);
-        if (application == null) {
-            LOGGER.error("Application {}:{} from {} is re-registering with a rank the registry never provided. Rank: {}",
-                    group, name, connection.getRemoteAddress(), rank);
-            connection.send(new ApplicationTerminationMessage(
-                    ApplicationTermination.REASON_RANK_UNAVAILABLE_FOR_RE_REGISTRATION));
-            return;
-        }
-
-        if (application.isRunning() && !validateAuthenticationToken(application, authenticationToken, connection)) {
-            return;
-        }
-
-        application.setConnection(connection);
-        LOGGER.info("Application {} re-registered with client: {}", application.getDisplayName(),
-                connection.getRemoteAddress());
+        ApplicationManager.withNamespaceLock(group, name, () -> {
+            Application application = applicationManager.findApplication(group, name, rank);
+            if (application == null) {
+                LOGGER.error("Application {}:{} from {} is re-registering with a rank the registry never provided. "
+                        + "Rank: {}", group, name, connection.getRemoteAddress(), rank);
+                askToTerminate(connection, ApplicationTermination.REASON_RANK_UNAVAILABLE_FOR_RE_REGISTRATION);
+                return;
+            }
+            if (isHeldByAnotherInstance(application, authenticationToken)) {
+                LOGGER.warn("Rank of {} is held by another running instance. Asking {} to terminate",
+                        application.getDisplayName(), connection.getRemoteAddress());
+                askToTerminate(connection, ApplicationTermination.REASON_RANK_HELD_BY_ANOTHER_INSTANCE);
+                return;
+            }
+            application.setConnection(connection);
+            application.setRunLevel(RunLevel.RUNNING);
+            LOGGER.info("Application {} re-registered with client: {}", application.getDisplayName(),
+                    connection.getRemoteAddress());
+        });
     }
 
-    private boolean validateAuthenticationToken(Application application, String authenticationToken,
-            Connection connection) {
-        if (authenticationToken == null) {
-            LOGGER.warn("Cannot re-register application {} without authentication token. Client Address: {}",
-                    application.getDisplayName(), connection.getRemoteAddress());
-            connection.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_MISSING));
-            return false;
-        }
-        if (!application.isAuthenticated(authenticationToken)) {
-            LOGGER.warn("Cannot re-register application {}. Invalid authentication token. Client Address: {}",
-                    application.getDisplayName(), connection.getRemoteAddress());
-            connection.send(new ApplicationTerminationMessage(ApplicationTermination.REASON_TOKEN_INVALID));
-            return false;
-        }
-        return true;
+    /**
+     * Whether a different instance owns this rank. Each registration issues a new token, so a running record whose
+     * token differs from the reconnecting instance's belongs to someone else. A record that is no longer running is
+     * free for its previous owner to reclaim.
+     */
+    private static boolean isHeldByAnotherInstance(Application application, String authenticationToken) {
+        return application.isRunning()
+                && (authenticationToken == null || !application.isAuthenticated(authenticationToken));
+    }
+
+    private static void askToTerminate(Connection connection, String reason) {
+        connection.send(new ApplicationTerminationMessage(reason));
     }
 
     private void handleLeaderElectionMessage(Connection connection, LeaderElectionMessage message) {
         connection.send(new LeaderStatusMessage(getRank(), Constants.getMyAddress(), Constants.APPLICATION_START_TIME));
-        if (getRank() == RANK_PRIMARY && Application.getApplication(connection) == null) {
-            setupMirrorRegistry(connection, message.getRank());
+        if (getRank() != RANK_PRIMARY) {
+            return;
         }
+        // Mirrors joining at the same time arrive on different event loops; the lock keeps their ranks distinct.
+        ApplicationManager.withNamespaceLock(APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, () -> {
+            if (Application.getApplication(connection) == null) {
+                setupMirrorRegistry(connection, message.getRank());
+            }
+        });
     }
 
     @Override
@@ -248,8 +258,9 @@ public class RegistryServer implements ServerCallback {
     private void setupMirrorRegistry(Connection connection, int previousRank) {
         Application mirrorInstance = findRegistryInstance(previousRank);
         if (previousRank < RANK_MIRROR || mirrorInstance == null || mirrorInstance.isConnected()) {
+            // Rank 1 belongs to this primary even before actAsPrimary records it.
             mirrorInstance = applicationManager.createApplicationWithNextAvailableRank(
-                    APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY);
+                    APPLICATION_GROUP_NAME, APPLICATION_NAME_REGISTRY, RANK_MIRROR);
         }
         mirrorInstance.handleRegistration(connection);
     }

@@ -33,6 +33,7 @@ public class LeaderElectorClient implements ClientCallback {
             new NioEventLoopGroup(new DefaultThreadFactory("leader-elector-client-worker"));
     private final Map<Client, LeaderStatusMessage> peerStatus = new ConcurrentHashMap<>();
     private final List<Client> pendingPeers = new CopyOnWriteArrayList<>();
+    private final Object electionLock = new Object();
     private volatile Client primaryClient = null;
     private volatile boolean trueRankReceived = false;
 
@@ -71,9 +72,11 @@ public class LeaderElectorClient implements ClientCallback {
     private void handleRegistryRegistrationMessage(Client client, RegistryRegistrationResponse rankUpdateMessage) {
         LOGGER.info("Received application registration message from {}. Rank: {}", client.getRemoteAddress(),
                 rankUpdateMessage.getRank());
-        RegistryServer.updateApplicationData(client, rankUpdateMessage);
-        primaryClient = client;
-        trueRankReceived = true;
+        synchronized (electionLock) {
+            RegistryServer.updateApplicationData(client, rankUpdateMessage);
+            primaryClient = client;
+            trueRankReceived = true;
+        }
     }
 
     private void handleLeaderStatusMessage(Client client, LeaderStatusMessage leaderStatusMessage) {
@@ -97,20 +100,31 @@ public class LeaderElectorClient implements ClientCallback {
     public void start(int connectionAttempts) throws InterruptedException {
         reset();
         connectToAllRegistryInstances(connectionAttempts);
-        while (true) {
-            Decision decision = decide();
-            if (decision == Decision.LEAD) {
-                logElectionSummary(decision);
-                RegistryServer.setRank(RANK_PRIMARY);
-                return;
-            }
-            if (decision == Decision.FOLLOW_PRIMARY && trueRankReceived) {
-                logElectionSummary(decision);
-                RegistryServer.setPrimaryConnection(primaryClient);
-                return;
-            }
+        while (!concludeElection()) {
             requestPeerStatus();
             Thread.sleep(REGISTRY_LEADER_ELECTION_POLL_MILLIS);
+        }
+    }
+
+    /**
+     * Only a primary registers a peer, so a registration overrides the peer statuses, which may predate that peer
+     * winning. The lock keeps a registration from arriving between deciding to lead and taking rank 1.
+     *
+     * @return whether the election is over
+     */
+    private boolean concludeElection() {
+        synchronized (electionLock) {
+            if (trueRankReceived) {
+                logElectionSummary(Decision.FOLLOW_PRIMARY);
+                RegistryServer.setPrimaryConnection(primaryClient);
+                return true;
+            }
+            if (decide() == Decision.LEAD) {
+                logElectionSummary(Decision.LEAD);
+                RegistryServer.setRank(RANK_PRIMARY);
+                return true;
+            }
+            return false;
         }
     }
 

@@ -76,6 +76,15 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <MY_EXTERNAL_IP>127.0.0.1</MY_EXTERNAL_IP>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
