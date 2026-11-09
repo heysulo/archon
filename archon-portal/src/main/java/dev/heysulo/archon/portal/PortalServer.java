@@ -63,6 +63,7 @@ final class PortalServer implements ProcessFeed.Listener {
     private final ScheduledExecutorService broadcaster = Executors.newSingleThreadScheduledExecutor(
             new DefaultThreadFactory("portal-broadcast", true));
     private HttpServer server;
+    private final LogStreams logStreams;
     private ExecutorService executor;
 
     /**
@@ -81,6 +82,7 @@ final class PortalServer implements ProcessFeed.Listener {
         this.assets = new StaticAssets(assetRoot);
         this.authApi = authApi;
         this.sessions = sessions;
+        this.logStreams = new LogStreams(feed, sessions);
         if (assets.index().isEmpty()) {
             LOGGER.warn("No frontend at {} in this build; the API still works", assetRoot);
         }
@@ -120,6 +122,7 @@ final class PortalServer implements ProcessFeed.Listener {
     }
 
     void stop() {
+        logStreams.stop();
         streams.forEach(Stream::close);
         server.stop(0);
         executor.shutdownNow();
@@ -191,6 +194,10 @@ final class PortalServer implements ProcessFeed.Listener {
     }
 
     private void processes(HttpExchange exchange) throws IOException {
+        if (LogStreams.matches(exchange.getRequestURI().getRawPath())) {
+            logStreams.handle(exchange);
+            return;
+        }
         if (!isGet(exchange) || processViewer(exchange).isEmpty()) {
             return;
         }

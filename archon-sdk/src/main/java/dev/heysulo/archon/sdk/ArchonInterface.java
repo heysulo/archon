@@ -1,5 +1,8 @@
 package dev.heysulo.archon.sdk;
 
+import dev.heysulo.archon.sdk.logs.LogCapture;
+import dev.heysulo.archon.sdk.logs.LogSettings;
+import dev.heysulo.archon.sdk.logs.LogShipper;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRegistrationMessage;
 import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
@@ -100,6 +103,8 @@ public class ArchonInterface {
     private volatile Reconnector reconnector;
     private volatile boolean terminated;
     private volatile ConfigClient configs;
+    // Sends log lines to the registry while someone watches them in the portal
+    private volatile LogShipper logs;
     // The rank the application last acknowledged, reset whenever the rank changes
     private volatile int acknowledgedRank = RANK_UNKNOWN;
     private final Object rankLock = new Object();
@@ -147,7 +152,10 @@ public class ArchonInterface {
      *                                             not assign a rank in time
      */
     public int initialize(String groupName, String applicationName, ArchonCallback callback) {
-        LOGGER.info("Initializing ArchonInterface");
+        // First, so the lines logged while starting are kept for the first watcher
+        String capture = LogCapture.install();
+        LOGGER.info("Initializing ArchonInterface. Capturing logs from {}", capture);
+        this.logs = new LogShipper(message -> primaryRegistry.sendMessage(message));
         this.groupName = groupName;
         this.applicationName = applicationName;
         this.events = new RegistryEvents(callback, callbackThread);
@@ -186,13 +194,21 @@ public class ArchonInterface {
         primaryRegistry.connect(primaryRegistryLocation);
     }
 
+    // How many log lines to keep follows configurations, so changes in the portal apply at once
+    private void configChanged(String name, ConfigValue oldValue, ConfigValue newValue) {
+        if (LogSettings.NAMES.contains(name)) {
+            LogSettings.apply(setting -> getConfig(setting).map(ConfigValue::asString));
+        }
+        events.configChanged(name, oldValue, newValue);
+    }
+
     // archon-config and the portal hold every configuration through replicateConfigs instead
     private void startConfigs(String group, String name) {
         if ("Archon".equals(group) && ("Config".equals(name) || "Portal".equals(name))) {
             return;
         }
         configs = new ConfigClient(group, name, () -> rank,
-                () -> primaryRegistry.getAuthenticationToken(), this::connectToConfigs, events::configChanged,
+                () -> primaryRegistry.getAuthenticationToken(), this::connectToConfigs, this::configChanged,
                 reconnectThread);
         configs.start();
         if (!configs.awaitFirstSnapshot(FIRST_CONFIG_WAIT_MILLIS)) {
@@ -342,6 +358,11 @@ public class ArchonInterface {
      * happens in the background.
      */
     public void onRegistryConnectionLost() {
+        LogShipper shipper = logs;
+        if (shipper != null) {
+            // A new primary asks again if anyone is still watching
+            shipper.stop();
+        }
         Reconnector current = reconnector;
         if (current != null && !terminated) {
             current.connectionLost();
@@ -630,6 +651,26 @@ public class ArchonInterface {
      *
      * @param message the registry's answer
      */
+    /**
+     * Called by the SDK when the registry starts or stops asking for this instance's log lines; not for
+     * applications.
+     *
+     * @param streaming whether anyone is watching
+     */
+    public void onLogStreamControl(boolean streaming) {
+        LogShipper shipper = logs;
+        if (shipper == null) {
+            return;
+        }
+        if (streaming) {
+            LOGGER.info("Streaming logs to the portal");
+            shipper.start();
+        } else {
+            shipper.stop();
+            LOGGER.info("Stopped streaming logs: nobody is watching");
+        }
+    }
+
     public void onServiceResponse(Message message) {
         if (services != null) {
             services.onResponse(message);

@@ -126,6 +126,7 @@ public class RegistryServer implements ServerCallback {
     @Override
     public void onDisconnect(Server server, Connection connection) {
         LOGGER.debug("Client disconnected from {}", connection.getRemoteAddress());
+        LogRelays.getInstance().disconnected(connection);
     }
 
     @Override
@@ -171,6 +172,8 @@ public class RegistryServer implements ServerCallback {
             connection.send(new ProcessListResponse(request.getRequestId(), getTerm(), listProcesses()));
         } else if (message instanceof ProcessWatchRequest) {
             ProcessWatchers.getInstance().watch(connection);
+        } else if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.ProcessLogWatch watch) {
+            handleLogWatch(connection, watch);
         } else if (message instanceof VerifyInstanceRequest request) {
             connection.send(new VerifyInstanceResponse(request.getRequestId(), verify(request)));
         } else {
@@ -204,6 +207,30 @@ public class RegistryServer implements ServerCallback {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Logs can hold secrets the process list does not, so with TLS on only the portal may watch them; it checks the
+     * user's permission. Without TLS, as before, whoever reaches the registry may.
+     */
+    private void handleLogWatch(Connection connection, dev.heysulo.archon.dictionary.sdk.messages.ProcessLogWatch watch) {
+        java.util.Optional<ArchonIdentity> peer = ArchonIdentity.of(connection);
+        if (RegistryTls.current().enabled() && peer.isPresent() && !peer.get().equals(ArchonIdentity.PORTAL)) {
+            LOGGER.warn("Refused {} watching logs: only the portal may", peer.get());
+            return;
+        }
+        Application application = applicationManager.findApplication(watch.getGroup(), watch.getName(),
+                watch.getRank());
+        if (!watch.isWatch()) {
+            LogRelays.getInstance().unwatch(connection, application);
+            return;
+        }
+        if (application == null || !application.isRunning()) {
+            connection.send(dev.heysulo.archon.dictionary.sdk.messages.ProcessLogBatch.status(watch.getGroup(),
+                    watch.getName(), watch.getRank(), LogRelays.NOT_RUNNING));
+            return;
+        }
+        LogRelays.getInstance().watch(connection, application);
     }
 
     /** Why the certificate the instance connected with does not let it register as it asks, if it does not. */
@@ -294,6 +321,8 @@ public class RegistryServer implements ServerCallback {
             }
             LOGGER.info("Application {} re-registered with client: {}", application.getDisplayName(),
                     connection.getRemoteAddress());
+            // A watcher may have asked for its logs before it got here, as after a failover
+            LogRelays.getInstance().connected(application);
         });
     }
 

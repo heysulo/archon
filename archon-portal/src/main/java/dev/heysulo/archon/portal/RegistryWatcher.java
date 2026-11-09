@@ -1,5 +1,7 @@
 package dev.heysulo.archon.portal;
 
+import dev.heysulo.archon.dictionary.sdk.messages.ProcessLogBatch;
+import dev.heysulo.archon.dictionary.sdk.messages.ProcessLogWatch;
 import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.dictionary.sdk.messages.ProcessListRequest;
 import dev.heysulo.archon.dictionary.sdk.messages.ProcessListResponse;
@@ -50,6 +52,9 @@ final class RegistryWatcher implements ClientCallback, ProcessFeed {
     private volatile ProcessSnapshot latest;
     private volatile long lastHeardNanos;
     private volatile String lostReason = "Connecting to the registry";
+    // Log watchers by instance, as group:name:rank. The registry is asked once per instance, however many watch
+    private final java.util.Map<String, List<java.util.function.Consumer<ProcessLogBatch>>> logWatchers =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     void start() {
         watchThread.execute(this::connect);
@@ -109,6 +114,8 @@ final class RegistryWatcher implements ClientCallback, ProcessFeed {
         lastHeardNanos = System.nanoTime();
         LOGGER.info("Watching the process list of the primary registry at {}", primary);
         fresh.send(new ProcessWatchRequest());
+        // A new primary knows nothing of the logs being watched through the last one
+        logWatchers.keySet().forEach(key -> sendLogWatch(fresh, key, true));
     }
 
     private void check() {
@@ -169,7 +176,61 @@ final class RegistryWatcher implements ClientCallback, ProcessFeed {
     }
 
     @Override
+    public Runnable watchLogs(String group, String name, int rank,
+            java.util.function.Consumer<ProcessLogBatch> listener) {
+        String key = logKey(group, name, rank);
+        boolean first;
+        synchronized (logWatchers) {
+            List<java.util.function.Consumer<ProcessLogBatch>> list = logWatchers.computeIfAbsent(key,
+                    ignored -> new CopyOnWriteArrayList<>());
+            first = list.isEmpty();
+            list.add(listener);
+        }
+        Client current = client;
+        if (first && current != null && current.isConnected()) {
+            sendLogWatch(current, key, true);
+        }
+        return () -> {
+            boolean last;
+            synchronized (logWatchers) {
+                List<java.util.function.Consumer<ProcessLogBatch>> list = logWatchers.get(key);
+                last = list != null && list.remove(listener) && list.isEmpty();
+                if (last) {
+                    logWatchers.remove(key);
+                }
+            }
+            Client now = client;
+            if (last && now != null && now.isConnected()) {
+                sendLogWatch(now, key, false);
+            }
+        };
+    }
+
+    static String logKey(String group, String name, int rank) {
+        return group + ":" + name + ":" + rank;
+    }
+
+    private static void sendLogWatch(Client to, String key, boolean watch) {
+        int last = key.lastIndexOf(':');
+        int first = key.indexOf(':');
+        try {
+            to.send(new ProcessLogWatch(key.substring(0, first), key.substring(first + 1, last),
+                    Integer.parseInt(key.substring(last + 1)), watch));
+        } catch (RuntimeException e) {
+            LOGGER.debug("Cannot {} the logs of {}: {}", watch ? "watch" : "stop watching", key, e.getMessage());
+        }
+    }
+
+    @Override
     public void onMessage(Client receiver, Message message) {
+        if (receiver == client && message instanceof ProcessLogBatch batch) {
+            List<java.util.function.Consumer<ProcessLogBatch>> list = logWatchers.get(
+                    logKey(batch.getGroup(), batch.getName(), batch.getRank()));
+            if (list != null) {
+                list.forEach(listener -> listener.accept(batch));
+            }
+            return;
+        }
         if (receiver != client || !(message instanceof ProcessListResponse response)) {
             return;
         }

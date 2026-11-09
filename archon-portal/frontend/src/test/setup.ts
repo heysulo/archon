@@ -21,3 +21,10 @@ class NoResizeObserver {
   disconnect() {}
 }
 window.ResizeObserver = window.ResizeObserver ?? NoResizeObserver;
+
+// jsdom has no font loading API, which Mantine's auto-sizing textarea listens to
+if (!("fonts" in document)) {
+  Object.defineProperty(document, "fonts", {
+    value: { addEventListener: () => {}, removeEventListener: () => {}, ready: Promise.resolve() },
+  });
+}

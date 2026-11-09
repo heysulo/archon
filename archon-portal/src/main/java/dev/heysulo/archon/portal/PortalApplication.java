@@ -12,6 +12,7 @@ import dev.heysulo.archon.portal.tls.JoinTokenStore;
 import dev.heysulo.archon.portal.tls.PortalHttps;
 import dev.heysulo.archon.portal.tls.TlsStatus;
 import dev.heysulo.archon.sdk.ArchonInterface;
+import dev.heysulo.archon.sdk.logs.LogSettings;
 import dev.heysulo.archon.sdk.tls.ArchonTls;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.slf4j.Logger;
@@ -38,6 +39,7 @@ public final class PortalApplication {
     static final int DEFAULT_PORT = 8080;
     private static final Logger LOGGER = LoggerFactory.getLogger(PortalApplication.class);
     private static final long CLEAN_UP_MINUTES = 10;
+    private static final long LOG_SETTINGS_SECONDS = 30;
 
     private PortalApplication() {
     }
@@ -69,6 +71,7 @@ public final class PortalApplication {
             server.stop();
             database.close();
         }, "portal-shutdown"));
+        followLogSettings(configs);
         Thread registration = new Thread(() -> register(identity, configs, database), "portal-registration");
         registration.setDaemon(true);
         registration.start();
@@ -95,6 +98,22 @@ public final class PortalApplication {
                 LOGGER.warn("Session clean-up failed: {}", e.getMessage());
             }
         }, CLEAN_UP_MINUTES, CLEAN_UP_MINUTES, TimeUnit.MINUTES);
+    }
+
+    /**
+     * The portal holds every configuration rather than subscribing to its own, so it reads how many log lines to
+     * keep from its copy now and then.
+     */
+    private static void followLogSettings(PortalConfigs configs) {
+        ScheduledExecutorService follower = Executors.newSingleThreadScheduledExecutor(
+                new io.netty.util.concurrent.DefaultThreadFactory("portal-log-settings", true));
+        follower.scheduleWithFixedDelay(() -> {
+            try {
+                LogSettings.apply(configs.store().entries(), PortalIdentity.GROUP, PortalIdentity.NAME);
+            } catch (RuntimeException e) {
+                LOGGER.debug("Cannot apply the log settings: {}", e.getMessage());
+            }
+        }, 0, LOG_SETTINGS_SECONDS, TimeUnit.SECONDS);
     }
 
     private static void register(PortalIdentity identity, PortalConfigs configs, PortalDatabase database) {

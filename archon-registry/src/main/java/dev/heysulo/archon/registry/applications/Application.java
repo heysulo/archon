@@ -119,6 +119,7 @@ public class Application implements ConnectionCallback {
         registrationResponse.setTerm(RegistryServer.getTerm());
         registrationResponse.setAuthenticationToken(this.authenticationToken);
         send(registrationResponse);
+        dev.heysulo.archon.registry.server.LogRelays.getInstance().connected(this);
     }
 
     private boolean isRegistryInstance() {
@@ -138,6 +139,7 @@ public class Application implements ConnectionCallback {
                 return;
             }
             LOGGER.warn("{} disconnected from registry server.", this.getDisplayName());
+            dev.heysulo.archon.registry.server.LogRelays.getInstance().lost(this);
             markGone();
         });
     }
@@ -177,6 +179,11 @@ public class Application implements ConnectionCallback {
         }
         if (message instanceof ApplicationSyncMessage applicationSyncMessage) {
             handleApplicationSyncMessage(applicationSyncMessage);
+        }
+        if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.LogBatch batch
+                && RegistryServer.getRank() == RANK_PRIMARY) {
+            dev.heysulo.archon.registry.server.LogRelays.getInstance().fromInstance(this, batch);
+            return;
         }
         if (message instanceof StateSnapshotComplete && RegistryServer.getRank() != RANK_PRIMARY) {
             RegistryReadiness.ready("holding the primary's state");

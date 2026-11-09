@@ -152,6 +152,8 @@ public class PrimaryRegistry implements ClientCallback {
             archonInterface.onRankUpdateMessage(rankUpdateMessage.getRank());
         } else if (message instanceof ServiceLookupResponseMessage || message instanceof ServiceStartResponseMessage) {
             archonInterface.onServiceResponse(message);
+        } else if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.LogStreamControl control) {
+            archonInterface.onLogStreamControl(control.isStreaming());
         } else if (message instanceof ApplicationTerminationMessage terminationMessage) {
             LOGGER.error("Received termination message from primary registry. Reason: {}",
                     terminationMessage.getReason());

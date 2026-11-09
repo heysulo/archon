@@ -30,6 +30,9 @@ import java.util.regex.Pattern;
  * <ul>
  *     <li>{@code GET /api/configs?q=&level=&offset=&limit=} one page of configurations at every level, from this
  *     replica's memory, with the total matching ({@code configs:view})</li>
+ *     <li>{@code GET /api/configs/effective?group=&application=} what an instance of that application sees: for
+ *     each name the configuration that wins, application over group over global, and the ones it overrides
+ *     ({@code configs:view})</li>
  *     <li>{@code POST /api/configs}, {@code PUT /api/configs/{id}}, {@code DELETE /api/configs/{id}}
  *     ({@code configs:manage}), recorded as made by the signed-in user</li>
  * </ul>
@@ -50,6 +53,34 @@ final class ConfigApi {
 
         /** @throws ConfigurationException while archon-config cannot be reached */
         ConfigAdmin admin();
+    }
+
+    /**
+     * A configuration an application's instances see.
+     *
+     * @param effective  the one that wins
+     * @param overridden the less specific ones of the same name it hides, most specific first
+     */
+    record Effective(ConfigEntry effective, List<ConfigEntry> overridden) {
+    }
+
+    /** What an instance of {@code group}:{@code application} sees, by name. */
+    static List<Effective> effective(java.util.Collection<ConfigEntry> entries, String group, String application) {
+        java.util.Map<String, List<ConfigEntry>> byName = new java.util.TreeMap<>();
+        for (ConfigEntry entry : entries) {
+            boolean seen = switch (entry.level()) {
+                case GLOBAL -> true;
+                case GROUP -> entry.group().equals(group);
+                case APPLICATION -> entry.group().equals(group) && entry.application().equals(application);
+            };
+            if (seen) {
+                byName.computeIfAbsent(entry.name(), key -> new java.util.ArrayList<>()).add(entry);
+            }
+        }
+        return byName.values().stream().map(list -> {
+            list.sort(java.util.Comparator.comparingInt((ConfigEntry entry) -> entry.level().ordinal()).reversed());
+            return new Effective(list.get(0), List.copyOf(list.subList(1, list.size())));
+        }).toList();
     }
 
     /** One page of a list, and how many match in all. */
@@ -162,6 +193,24 @@ final class ConfigApi {
                 } else {
                     Http.sendError(exchange, 405, "Method not allowed");
                 }
+                return;
+            }
+            if (path.equals("/api/configs/effective")) {
+                if (!method.equals("GET")) {
+                    Http.sendError(exchange, 405, "Method not allowed");
+                    return;
+                }
+                AuthService.require(user, Permission.CONFIGS_VIEW);
+                if (!source.synced()) {
+                    throw ConfigurationException.unavailable("Configurations are still loading", null);
+                }
+                java.util.Map<String, String> query = Http.queryParameters(exchange.getRequestURI());
+                String group = query.getOrDefault("group", "");
+                String application = query.getOrDefault("application", "");
+                if (group.isBlank() || application.isBlank()) {
+                    throw new AuthException(400, "Name the group and application");
+                }
+                Http.sendJson(exchange, 200, effective(source.replica().entries(), group, application));
                 return;
             }
             Matcher match = CONFIG_PATH.matcher(path);

@@ -1,16 +1,15 @@
-import { MantineProvider } from "@mantine/core";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { ProcessStreamContext, type ProcessStreamState } from "../../api/processStream";
 import { snapshot } from "../../test/fixtures";
+import { renderWith } from "../../test/render";
 import { ProcessesPage } from "./ProcessesPage";
 
-function renderPage(state: ProcessStreamState) {
-  return render(
-    <MantineProvider>
-      <ProcessStreamContext.Provider value={state}>
-        <ProcessesPage />
-      </ProcessStreamContext.Provider>
-    </MantineProvider>,
+function renderPage(state: ProcessStreamState, permissions = ["*"]) {
+  return renderWith(
+    <ProcessStreamContext.Provider value={state}>
+      <ProcessesPage />
+    </ProcessStreamContext.Provider>,
+    { user: { id: 1, username: "admin", displayName: "Admin", roles: ["admin"], permissions } },
   );
 }
 
@@ -56,6 +55,23 @@ describe("ProcessesPage", () => {
     renderPage({ snapshot, status: "live", error: null });
     expect(screen.getByLabelText("ping:9001, TLS")).toBeInTheDocument();
     expect(screen.getByLabelText("ping:9001, not encrypted")).toBeInTheDocument();
+  });
+
+  it("offers live logs of running instances to those allowed", () => {
+    renderPage({ snapshot, status: "live", error: null });
+    expect(screen.getByLabelText("Logs of Group:Application #1")).toBeInTheDocument();
+    renderPage({ snapshot, status: "live", error: null }, ["processes:view"]).unmount();
+  });
+
+  it("opens a process's details when its row is clicked", async () => {
+    renderPage({ snapshot, status: "live", error: null });
+    fireEvent.click(screen.getByText("hello-world-java-94fdt"));
+    expect(await screen.findByText("Group:Application #2")).toBeInTheDocument();
+  });
+
+  it("hides live logs from those not allowed", () => {
+    renderPage({ snapshot, status: "live", error: null }, ["processes:view"]);
+    expect(screen.queryByLabelText("Logs of Group:Application #1")).not.toBeInTheDocument();
   });
 
   it("warns when the registry is unavailable but keeps the last state", () => {

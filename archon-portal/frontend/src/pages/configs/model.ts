@@ -12,6 +12,9 @@ export function scopeOf(config: Pick<Config, "level" | "group" | "application">)
   }
 }
 
+/** Each level's colour, the same wherever a configuration's level shows. */
+export const LEVEL_COLORS: Record<ConfigLevel, string> = { GLOBAL: "indigo", GROUP: "teal", APPLICATION: "orange" };
+
 export const LEVEL_LABELS: Record<ConfigLevel, string> = {
   GLOBAL: "Global",
   GROUP: "Group",

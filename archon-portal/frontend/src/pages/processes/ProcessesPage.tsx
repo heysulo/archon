@@ -1,7 +1,12 @@
-import { Alert, Badge, Box, Button, Card, Center, Code, Group, Loader, MultiSelect, Paper, Select, SimpleGrid, Stack,
-  Switch, Table, Text, TextInput, Title, Tooltip, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Box, Button, Card, Center, Code, Group, Loader, MultiSelect, Paper, Select,
+  SimpleGrid, Stack, Switch, Table, Text, TextInput, Title, Tooltip, UnstyledButton } from "@mantine/core";
 import { useLocalStorage } from "@mantine/hooks";
-import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconSearch, IconSelector } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconFileText, IconSearch, IconSelector }
+  from "@tabler/icons-react";
+import { useAuth } from "../../auth/AuthProvider";
+import { PERMISSIONS } from "../../auth/permissions";
+import { ProcessDetails } from "./details/ProcessDetails";
+import { LogViewer } from "./logs/LogViewer";
 import { useMemo, useState, type ReactNode } from "react";
 import { useProcessStream } from "../../api/processStream";
 import type { ProcessInfo } from "../../api/types";
@@ -55,10 +60,15 @@ function SortableHeader({ column, sort, onSort, children }: {
   );
 }
 
-function Row({ process, showNode }: { process: ProcessInfo; showNode: boolean }) {
+function Row({ process, showNode, onOpen, onLogs }: {
+  process: ProcessInfo;
+  showNode: boolean;
+  onOpen: () => void;
+  onLogs?: () => void;
+}) {
   const role = roleOf(process);
   return (
-    <Table.Tr style={role.former ? { opacity: 0.55 } : undefined}>
+    <Table.Tr onClick={onOpen} style={{ cursor: "pointer", ...(role.former ? { opacity: 0.55 } : {}) }}>
       <Table.Td>
         <Text size="sm" ff="monospace" fw={500}>
           {applicationOf(process)}
@@ -119,6 +129,22 @@ function Row({ process, showNode }: { process: ProcessInfo; showNode: boolean })
           </Text>
         )}
       </Table.Td>
+      {onLogs !== undefined && (
+        <Table.Td>
+          {process.running && process.connected && (
+            <Tooltip label="Watch logs live">
+              <ActionIcon variant="subtle" color="gray" onClick={(event) => {
+                // The row opens the details; this opens the logs alone
+                event.stopPropagation();
+                onLogs();
+              }}
+                          aria-label={`Logs of ${applicationOf(process)} #${process.rank}`}>
+                <IconFileText size={16} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </Table.Td>
+      )}
     </Table.Tr>
   );
 }
@@ -131,6 +157,11 @@ const LINKS: { value: LinkFilter; label: string }[] = [
 
 export function ProcessesPage() {
   const { snapshot, status, error } = useProcessStream();
+  const { can } = useAuth();
+  const seesLogs = can(PERMISSIONS.logsView);
+  const [watching, setWatching] = useState<ProcessInfo | null>(null);
+  // Held by identity, so the drawer follows the instance as new snapshots arrive
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [applications, setApplications] = useState<string[]>([]);
   const [states, setStates] = useState<string[]>([]);
@@ -147,6 +178,8 @@ export function ProcessesPage() {
     [processes, query, showStopped, applications, states, link, sort],
   );
   const showNode = rows.some((process) => process.details?.node);
+  const keyOf = (process: ProcessInfo) => `${applicationOf(process)}#${process.rank}#${process.details?.host ?? ""}`;
+  const selected = processes.find((process) => keyOf(process) === selectedKey) ?? null;
   const filtered = query.trim() !== "" || applications.length > 0 || states.length > 0 || link !== "any";
 
   // A new column sorts ascending; the same column again flips it
@@ -263,12 +296,14 @@ export function ProcessesPage() {
                   {showNode && header("node", "Node")}
                   {header("link", "Registry link")}
                   {header("services", "Services")}
+                  {seesLogs && <Table.Th aria-label="Logs" />}
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {rows.map((process) => (
                   <Row key={`${applicationOf(process)}-${process.rank}-${process.details?.host ?? ""}-${process.runLevel}`}
-                       process={process} showNode={showNode} />
+                       process={process} showNode={showNode} onOpen={() => setSelectedKey(keyOf(process))}
+                       onLogs={seesLogs ? () => setWatching(process) : undefined} />
                 ))}
               </Table.Tbody>
             </Table>
@@ -279,6 +314,12 @@ export function ProcessesPage() {
           </Text>
         </Card>
       )}
+      <ProcessDetails process={selected} onClose={() => setSelectedKey(null)}
+                      onLogs={seesLogs ? (process) => {
+                        setSelectedKey(null);
+                        setWatching(process);
+                      } : undefined} />
+      <LogViewer process={watching} onClose={() => setWatching(null)} />
     </Stack>
   );
 }

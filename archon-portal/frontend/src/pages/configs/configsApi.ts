@@ -55,10 +55,32 @@ export function useConfigs(filter: ConfigFilter) {
   });
 }
 
-/** Every change refreshes the list afterwards, so it shows what archon-config stored. */
+/** A configuration an application's instances see, and the less specific ones of the same name it hides. */
+export interface EffectiveConfig {
+  effective: Config;
+  /** Most specific first. */
+  overridden: Config[];
+}
+
+/** What an instance of `group:application` sees, by name. */
+export function useEffectiveConfigs(group: string, application: string, enabled = true) {
+  return useQuery({
+    queryKey: [...CONFIGS, "effective", group, application],
+    queryFn: () => api<EffectiveConfig[]>(`/api/configs/effective?${new URLSearchParams({ group, application })}`),
+    enabled,
+  });
+}
+
+// archon-config pushes a change back to every portal replica a moment after storing it
+const PUSH_DELAY_MILLIS = 1_000;
+
+/** Every change refreshes the lists afterwards, so they show what archon-config stored. */
 export function useConfigMutations() {
   const client = useQueryClient();
-  const refresh = () => client.invalidateQueries({ queryKey: CONFIGS });
+  const refresh = () => {
+    setTimeout(() => void client.invalidateQueries({ queryKey: CONFIGS }), PUSH_DELAY_MILLIS);
+    return client.invalidateQueries({ queryKey: CONFIGS });
+  };
   return {
     create: useMutation({
       mutationFn: (config: ConfigInput) => api<Config>("/api/configs", { method: "POST", body: config }),

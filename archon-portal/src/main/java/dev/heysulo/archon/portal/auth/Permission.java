@@ -9,6 +9,7 @@ import java.util.Optional;
  */
 public enum Permission {
     PROCESSES_VIEW("processes:view", "See running processes"),
+    LOGS_VIEW("logs:view", "Watch processes' logs live. Logs can hold secrets, so grant it with care"),
     APPLICATIONS_VIEW("applications:view", "See which applications are defined"),
     APPLICATIONS_MANAGE("applications:manage", "Define applications, so their instances may register, and remove "
             + "definitions"),

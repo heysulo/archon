@@ -229,6 +229,30 @@ public class PortalServerTest {
     }
 
     @Test
+    public void showsWhatAnApplicationSees() throws Exception {
+        for (String level : List.of("{\"level\":\"global\"", "{\"level\":\"group\",\"group\":\"Shop\"",
+                "{\"level\":\"application\",\"group\":\"Shop\",\"application\":\"Cart\"")) {
+            Assert.assertEquals(post("/api/configs", level + ",\"name\":\"limit\",\"type\":\"INTEGER\","
+                    + "\"value\":\"" + level.length() + "\"}", adminCookie, true).statusCode(), 201);
+        }
+        Assert.assertEquals(post("/api/configs", "{\"level\":\"application\",\"group\":\"Shop\","
+                + "\"application\":\"Search\",\"name\":\"other\",\"type\":\"STRING\",\"value\":\"x\"}",
+                adminCookie, true).statusCode(), 201);
+
+        HttpResponse<String> cart = get("/api/configs/effective?group=Shop&application=Cart", adminCookie);
+        Assert.assertEquals(cart.statusCode(), 200, cart.body());
+        Assert.assertTrue(cart.body().startsWith("[{\"effective\":{"), cart.body());
+        Assert.assertTrue(cart.body().contains("\"level\":\"APPLICATION\""), cart.body());
+        Assert.assertFalse(cart.body().contains("\"name\":\"other\""), "another application's");
+        Assert.assertEquals(cart.body().split("\"level\":").length - 1, 3, "the winner and the two it hides");
+
+        HttpResponse<String> basket = get("/api/configs/effective?group=Shop&application=Basket", adminCookie);
+        Assert.assertTrue(basket.body().matches(".*\"effective\":\\{\"id\":\\d+,\"level\":\"GROUP\".*"),
+                "the group's wins for another application of the group: " + basket.body());
+        Assert.assertEquals(get("/api/configs/effective?group=Shop", adminCookie).statusCode(), 400);
+    }
+
+    @Test
     public void letsViewersSeeButNotChangeConfigurations() throws Exception {
         Assert.assertEquals(post("/api/users", "{\"username\":\"vic\",\"displayName\":\"Vic\","
                 + "\"password\":\"vics long password\",\"roles\":[\"viewer\"]}", adminCookie, true).statusCode(),
@@ -547,6 +571,42 @@ public class PortalServerTest {
         }
     }
 
+    // ---------------- live logs ----------------
+
+    @Test
+    public void streamsAnInstancesLogLines() throws Exception {
+        HttpResponse<InputStream> response = http.send(HttpRequest.newBuilder(URI.create(url(
+                "/api/processes/Group/Application/1/logs"))).header("Cookie", adminCookie).build(),
+                HttpResponse.BodyHandlers.ofInputStream());
+        Assert.assertEquals(response.statusCode(), 200);
+        try (EventStream events = new EventStream(response.body())) {
+            events.peek();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!feed.logWatchers.containsKey("Group:Application:1") && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            feed.logWatchers.get("Group:Application:1").accept(new dev.heysulo.archon.dictionary.sdk.messages
+                    .ProcessLogBatch("Group", "Application", 1, List.of(new dev.heysulo.archon.dictionary.sdk.logs
+                    .LogLine(5, "INFO", "com.example.Main", "main", "Warmed up")), 2, true, null));
+            Assert.assertEquals(events.nextEvent(), "lines");
+            Assert.assertTrue(events.lastData.contains("\"message\":\"Warmed up\""), events.lastData);
+            Assert.assertTrue(events.lastData.contains("\"dropped\":2"), events.lastData);
+            Assert.assertTrue(events.lastData.contains("\"history\":true"), events.lastData);
+        }
+    }
+
+    @Test
+    public void keepsLogsFromThoseNotAllowed() throws Exception {
+        Assert.assertEquals(post("/api/users", "{\"username\":\"lena\",\"displayName\":\"Lena\","
+                + "\"password\":\"lenas long password\",\"roles\":[\"viewer\"]}", adminCookie, true)
+                .statusCode(), 201);
+        String lena = signIn("lena", "lenas long password");
+        Assert.assertEquals(get("/api/processes/Group/Application/1/logs", lena).statusCode(), 403,
+                "seeing processes is not enough to read their logs");
+        Assert.assertEquals(get("/api/processes/Group/Application/1/logs", null).statusCode(), 401);
+        Assert.assertTrue(feed.logWatchers.isEmpty());
+    }
+
     // ---------------- frontend ----------------
 
     @Test
@@ -709,6 +769,19 @@ public class PortalServerTest {
         void push(ProcessSnapshot next) {
             snapshot = next;
             listeners.forEach(listener -> listener.onSnapshot(next));
+        }
+
+        // Log watchers by instance, as group:name:rank
+        final java.util.Map<String, java.util.function.Consumer<
+                dev.heysulo.archon.dictionary.sdk.messages.ProcessLogBatch>> logWatchers =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        @Override
+        public Runnable watchLogs(String group, String name, int rank,
+                java.util.function.Consumer<dev.heysulo.archon.dictionary.sdk.messages.ProcessLogBatch> listener) {
+            String key = group + ":" + name + ":" + rank;
+            logWatchers.put(key, listener);
+            return () -> logWatchers.remove(key);
         }
 
         void lose(String reason) {

@@ -12,34 +12,49 @@ interface Props {
   opened: boolean;
   /** The configuration being edited, or null to create one. */
   config: Config | null;
+  /**
+   * When creating, starts from these values with the level, group, application and name fixed, as when overriding
+   * a configuration for one application.
+   */
+  preset?: ConfigInput;
+  /** With a preset, lets the name be typed, as when adding one for an application. */
+  nameEditable?: boolean;
+  /** Shown above the form, to say what the change reaches. */
+  notice?: string;
+  title?: string;
   onClose: () => void;
   onSubmit: (input: ConfigInput) => Promise<void>;
 }
 
-export function ConfigFormModal({ opened, config, onClose, onSubmit }: Props) {
+export function ConfigFormModal({ opened, config, preset, nameEditable, notice, title, onClose, onSubmit }: Props) {
   return (
     <Modal opened={opened} onClose={onClose} size="lg"
-           title={config ? `Edit ${config.name}` : "Add configuration"}>
+           title={title ?? (config ? `Edit ${config.name}` : "Add configuration")}>
       {/* Mounted afresh each time the dialog opens, so the form starts from the configuration being edited */}
-      <ConfigForm key={config?.id ?? "new"} config={config} onClose={onClose} onSubmit={onSubmit} />
+      <ConfigForm key={config?.id ?? (preset ? `preset-${preset.level}-${preset.name}` : "new")} config={config}
+                  preset={preset} nameEditable={nameEditable} notice={notice} onClose={onClose} onSubmit={onSubmit} />
     </Modal>
   );
 }
 
-function ConfigForm({ config, onClose, onSubmit }: Omit<Props, "opened">) {
+function ConfigForm({ config, preset, nameEditable, notice, onClose, onSubmit }: Omit<Props, "opened" | "title">) {
   const creating = config === null;
+  // Scope and name can be typed only for a brand new configuration
+  const scopeOpen = creating && !preset;
+  const nameOpen = scopeOpen || (creating && Boolean(nameEditable));
+  const start = config ?? preset;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const form = useForm<ConfigInput>({
     initialValues: {
-      level: config?.level ?? "GLOBAL",
-      group: config?.group ?? "",
-      application: config?.application ?? "",
-      name: config?.name ?? "",
-      type: config?.type ?? "STRING",
-      value: config?.value ?? "",
-      readOnly: config?.readOnly ?? false,
-      description: config?.description ?? "",
+      level: start?.level ?? "GLOBAL",
+      group: start?.group ?? "",
+      application: start?.application ?? "",
+      name: start?.name ?? "",
+      type: start?.type ?? "STRING",
+      value: start?.value ?? "",
+      readOnly: start?.readOnly ?? false,
+      description: start?.description ?? "",
     },
     validate: {
       group: (value, values) => (values.level !== "GLOBAL" ? identifierError(value) : null),
@@ -71,6 +86,11 @@ function ConfigForm({ config, onClose, onSubmit }: Omit<Props, "opened">) {
   return (
     <form onSubmit={submit} noValidate>
       <Stack>
+        {notice && (
+          <Alert color="blue" variant="light">
+            {notice}
+          </Alert>
+        )}
         {error && (
           <Alert color="red" variant="light">
             {error}
@@ -82,7 +102,7 @@ function ConfigForm({ config, onClose, onSubmit }: Omit<Props, "opened">) {
           </Text>
           <SegmentedControl
             fullWidth
-            disabled={!creating}
+            disabled={!scopeOpen}
             data={(Object.keys(LEVEL_LABELS) as ConfigLevel[]).map((value) => ({ value, label: LEVEL_LABELS[value] }))}
             {...form.getInputProps("level")}
           />
@@ -93,14 +113,14 @@ function ConfigForm({ config, onClose, onSubmit }: Omit<Props, "opened">) {
           </Text>
         </div>
         {level !== "GLOBAL" && (
-          <TextInput label="Group" disabled={!creating} placeholder="Group" {...form.getInputProps("group")} />
+          <TextInput label="Group" disabled={!scopeOpen} placeholder="Group" {...form.getInputProps("group")} />
         )}
         {level === "APPLICATION" && (
-          <TextInput label="Application" disabled={!creating} placeholder="Application"
+          <TextInput label="Application" disabled={!scopeOpen} placeholder="Application"
                      {...form.getInputProps("application")} />
         )}
-        <TextInput label="Name" disabled={!creating} placeholder="ping.intervalMillis" styles={MONOSPACE}
-                   data-autofocus={creating || undefined} {...form.getInputProps("name")} />
+        <TextInput label="Name" disabled={!nameOpen} placeholder="ping.intervalMillis" styles={MONOSPACE}
+                   data-autofocus={nameOpen || undefined} {...form.getInputProps("name")} />
         <Select
           label="Type"
           data={["STRING", "INTEGER", "DECIMAL", "BOOLEAN"]}

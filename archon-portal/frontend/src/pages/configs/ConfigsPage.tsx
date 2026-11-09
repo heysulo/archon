@@ -8,13 +8,12 @@ import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
 import { ConfigFormModal } from "./ConfigFormModal";
 import { useConfigMutations, useConfigs, type Config, type ConfigInput, type ConfigLevel } from "./configsApi";
-import { LEVEL_LABELS, scopeOf } from "./model";
+import { LEVEL_COLORS, LEVEL_LABELS, scopeOf } from "./model";
 
 const PAGE_SIZE = 50;
 // Long enough to wait for the next keystroke, short enough to feel immediate
 const SEARCH_DELAY_MS = 250;
 
-const LEVEL_COLORS: Record<ConfigLevel, string> = { GLOBAL: "indigo", GROUP: "teal", APPLICATION: "orange" };
 
 export function ConfigsPage() {
   const { can } = useAuth();

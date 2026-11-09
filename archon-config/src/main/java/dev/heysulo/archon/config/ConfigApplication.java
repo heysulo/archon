@@ -4,6 +4,7 @@ import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.sdk.ArchonCallback;
 import dev.heysulo.archon.dictionary.tls.ArchonIdentity;
 import dev.heysulo.archon.sdk.ArchonInterface;
+import dev.heysulo.archon.sdk.logs.LogSettings;
 import dev.heysulo.archon.sdk.tls.ArchonTls;
 import dev.heysulo.archon.sdk.config.ConfigReplicaClient;
 import dev.heysulo.archon.sdk.services.ServiceException;
@@ -64,12 +65,16 @@ public final class ConfigApplication implements ArchonCallback {
         database.migrate();
         ConfigService service = new ConfigService(new ConfigStore(database.dataSource()), Clock.systemUTC());
         service.refresh();
+        ConfigDefaults.ensure(service);
+        LogSettings.apply(service.visibleTo(GROUP, NAME), GROUP, NAME);
 
         ScheduledExecutorService refresher = Executors.newSingleThreadScheduledExecutor(
                 new DefaultThreadFactory("config-refresh", true));
         refresher.scheduleWithFixedDelay(() -> {
             try {
                 service.refresh();
+                // archon-config does not subscribe to itself, so it reads its own settings here
+                LogSettings.apply(service.visibleTo(GROUP, NAME), GROUP, NAME);
             } catch (RuntimeException e) {
                 LOGGER.warn("Cannot refresh configurations: {}", e.getMessage());
             }
