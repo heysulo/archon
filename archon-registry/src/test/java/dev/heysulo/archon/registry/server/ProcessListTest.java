@@ -23,6 +23,45 @@ public class ProcessListTest {
     }
 
     // The portal connects without registering, so the primary answers on an unregistered connection
+    // Instances report CPU and memory over their registration's connection; the list carries the latest
+    @Test
+    public void carriesEachInstancesLatestMetrics() {
+        FakeConnection app = new FakeConnection();
+        ApplicationRegistrationMessage registration = new ApplicationRegistrationMessage("MetricsApp", "Metrics",
+                "TBD");
+        registration.setRank(RANK_UNKNOWN);
+        server.onMessage(null, app, registration);
+        dev.heysulo.archon.registry.applications.Application record =
+                dev.heysulo.archon.registry.applications.Application.getApplication(app);
+        dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics metrics =
+                new dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics(1, 0.25, 2, 300L << 20, 1L << 30,
+                        100L << 20, 256L << 20, 50L << 20, 30, 60_000);
+
+        record.onMessage(app, new dev.heysulo.archon.dictionary.sdk.messages.InstanceMetricsReport(metrics));
+        Assert.assertEquals(metricsOf("Metrics", "MetricsApp"), metrics);
+
+        // A portal from before metrics could not read them, so it is sent the list without
+        FakeConnection oldPortal = new FakeConnection();
+        server.onMessage(null, oldPortal, new ProcessListRequest(8));
+        Assert.assertNull(oldPortal.last(ProcessListResponse.class).getProcesses().stream()
+                .filter(p -> p.name().equals("MetricsApp")).findFirst().orElseThrow().metrics());
+
+        // A report on a connection not registered yet, as just after a reconnect, is ignored quietly
+        server.onMessage(null, new FakeConnection(),
+                new dev.heysulo.archon.dictionary.sdk.messages.InstanceMetricsReport(metrics));
+
+        app.drop();
+        Assert.assertNull(metricsOf("Metrics", "MetricsApp"), "a stopped process uses nothing");
+    }
+
+    private dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics metricsOf(String group, String name) {
+        FakeConnection portal = new FakeConnection();
+        server.onMessage(null, portal, new ProcessListRequest(7).acceptingMetrics());
+        return portal.last(ProcessListResponse.class).getProcesses().stream()
+                .filter(p -> p.group().equals(group) && p.name().equals(name))
+                .findFirst().orElseThrow().metrics();
+    }
+
     @Test
     public void listsEveryKnownProcessInOrder() {
         FakeConnection app = new FakeConnection();
@@ -55,7 +94,7 @@ public class ProcessListTest {
         server.onMessage(null, new FakeConnection(), registration);
 
         FakeConnection portal = new FakeConnection();
-        server.onMessage(null, portal, new ProcessListRequest(7));
+        server.onMessage(null, portal, new ProcessListRequest(7).acceptingMetrics());
 
         ProcessInfo detailed = portal.last(ProcessListResponse.class).getProcesses().stream()
                 .filter(p -> p.name().equals("DetailedApp")).findFirst().orElseThrow();

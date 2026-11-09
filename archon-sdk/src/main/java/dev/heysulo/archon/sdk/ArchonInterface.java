@@ -1,6 +1,7 @@
 package dev.heysulo.archon.sdk;
 
 import dev.heysulo.archon.sdk.logs.LogCapture;
+import dev.heysulo.archon.sdk.metrics.MetricsReporter;
 import dev.heysulo.archon.sdk.logs.LogSettings;
 import dev.heysulo.archon.sdk.logs.LogShipper;
 import dev.heysulo.archon.dictionary.sdk.messages.ApplicationRankUpdate;
@@ -105,6 +106,7 @@ public class ArchonInterface {
     private volatile ConfigClient configs;
     // Sends log lines to the registry while someone watches them in the portal
     private volatile LogShipper logs;
+    private volatile MetricsReporter metrics;
     // The rank the application last acknowledged, reset whenever the rank changes
     private volatile int acknowledgedRank = RANK_UNKNOWN;
     private final Object rankLock = new Object();
@@ -168,6 +170,14 @@ public class ArchonInterface {
         joinWithTls(groupName, applicationName);
         setupPrimaryRegistryConnection();
         registerApplication();
+        // CPU and memory for the portal's process list, every few seconds from now on
+        metrics = new MetricsReporter(message -> {
+            // An older primary would not know the report and drop the connection, so only one that said it accepts
+            if (RegistryLookupService.getInstance().primaryAcceptsMetrics()) {
+                primaryRegistry.sendMessage(message);
+            }
+        });
+        metrics.start();
         startConfigs(groupName, applicationName);
         return rank;
     }
@@ -386,6 +396,10 @@ public class ArchonInterface {
      */
     public void onTerminated(String reason) {
         terminated = true;
+        MetricsReporter reporter = metrics;
+        if (reporter != null) {
+            reporter.stop();
+        }
         Reconnector current = reconnector;
         if (current != null) {
             current.stop();

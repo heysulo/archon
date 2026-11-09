@@ -35,6 +35,10 @@ public class RegistryLookupService {
     }
 
     /** @return the process's single lookup service */
+    // Whether each registry said it accepts metrics, from its last lookup answer
+    private final java.util.Map<String, Boolean> acceptsMetrics = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile boolean primaryAcceptsMetrics;
+
     public static synchronized RegistryLookupService getInstance() {
         if (instance == null) {
             instance = new RegistryLookupService();
@@ -53,8 +57,14 @@ public class RegistryLookupService {
         String location = choosePrimary(RegistryConstants.getRegistryLocations(), this::primaryTerm);
         if (location != null) {
             LOGGER.info("Primary registry found at {}", location);
+            primaryAcceptsMetrics = acceptsMetrics.getOrDefault(location, false);
         }
         return location;
+    }
+
+    /** Whether the primary found by the last search accepts CPU and memory reports. */
+    public boolean primaryAcceptsMetrics() {
+        return primaryAcceptsMetrics;
     }
 
     /**
@@ -96,6 +106,7 @@ public class RegistryLookupService {
             lookupConnection.send(new PrimaryRegistryLookupMessage());
             LOGGER.debug("Waiting for registry lookup response from {}", registryLocation);
             long term = lookup.answer.get(LOOKUP_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            acceptsMetrics.put(registryLocation, lookup.metricsAccepted);
             if (term == NOT_PRIMARY) {
                 LOGGER.debug("{} is not the primary registry", registryLocation);
             }
@@ -137,6 +148,7 @@ public class RegistryLookupService {
      */
     static final class Lookup implements ClientCallback {
         final CompletableFuture<Long> answer = new CompletableFuture<>();
+        volatile boolean metricsAccepted;
 
         @Override
         public void onConnect(Client client) {
@@ -151,6 +163,7 @@ public class RegistryLookupService {
         @Override
         public void onMessage(Client client, Message message) {
             if (message instanceof PrimaryRegistryLookupResponseMessage response) {
+                metricsAccepted = response.isMetricsAccepted();
                 answer.complete(response.getRank() == RegistryProtocol.RANK_PRIMARY ? response.getTerm() : NOT_PRIMARY);
             }
         }

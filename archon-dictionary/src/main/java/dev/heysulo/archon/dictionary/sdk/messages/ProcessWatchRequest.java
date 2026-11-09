@@ -10,4 +10,17 @@ import dev.heysulo.databridge.core.common.Message;
 public class ProcessWatchRequest implements Message {
     public static final long PUSHED = -1;
     private static final long serialVersionUID = 1L;
+
+    // Absent from portals that predate metrics, which read as false
+    private boolean metricsAccepted;
+
+    /** Whether the watcher can read process lists carrying metrics; older ones are sent lists without. */
+    public boolean isMetricsAccepted() {
+        return metricsAccepted;
+    }
+
+    public ProcessWatchRequest acceptingMetrics() {
+        this.metricsAccepted = true;
+        return this;
+    }
 }

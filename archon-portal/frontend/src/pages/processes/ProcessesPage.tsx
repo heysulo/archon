@@ -6,6 +6,7 @@ import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconFileText, IconSe
 import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
 import { ProcessDetails } from "./details/ProcessDetails";
+import { CpuCell, MemoryCell } from "./ResourceCells";
 import { LogViewer } from "./logs/LogViewer";
 import { useMemo, useState, type ReactNode } from "react";
 import { useProcessStream } from "../../api/processStream";
@@ -89,6 +90,12 @@ function Row({ process, showNode, onOpen, onLogs }: {
         <Badge variant="light" color={stateTone(process)} radius="sm" style={{ overflow: "visible" }}>
           {process.runLevel}
         </Badge>
+      </Table.Td>
+      <Table.Td>
+        <CpuCell metrics={process.metrics} />
+      </Table.Td>
+      <Table.Td>
+        <MemoryCell metrics={process.metrics} />
       </Table.Td>
       <Table.Td>
         <Detail value={process.details?.host} />
@@ -284,13 +291,15 @@ export function ProcessesPage() {
         <Card withBorder padding={0} radius="md">
           {/* Narrow screens scroll the table sideways rather than wrapping pod names and squeezing badges */}
           <Box style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="xs" striped highlightOnHover miw={1000} style={{ whiteSpace: "nowrap" }}>
+            <Table verticalSpacing="xs" striped highlightOnHover miw={1160} style={{ whiteSpace: "nowrap" }}>
               <Table.Thead>
                 <Table.Tr>
                   {header("application", "Application")}
                   {header("rank", "Rank")}
                   {header("role", "Role")}
                   {header("state", "State")}
+                  {header("cpu", "CPU")}
+                  {header("memory", "Memory")}
                   {header("host", "Host")}
                   {header("address", "Address")}
                   {showNode && header("node", "Node")}

@@ -74,6 +74,15 @@ describe("ProcessesPage", () => {
     expect(screen.queryByLabelText("Logs of Group:Application #1")).not.toBeInTheDocument();
   });
 
+  it("shows each instance's CPU and memory, sortable", () => {
+    renderPage({ snapshot, status: "live", error: null });
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("300 MB")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Sort by cpu"));
+    fireEvent.click(screen.getByLabelText("Sort by cpu"));
+    expect(screen.getAllByRole("row")[1]!.textContent).toContain("25%");
+  });
+
   it("warns when the registry is unavailable but keeps the last state", () => {
     renderPage({ snapshot, status: "offline", error: "No primary registry is answering" });
     expect(screen.getByText(/No primary registry is answering/)).toBeInTheDocument();

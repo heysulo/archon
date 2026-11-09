@@ -19,6 +19,8 @@ describe("ProcessDetails", () => {
     mockPortal({ [ROUTE]: { body: EFFECTIVE } });
     renderWith(<ProcessDetails process={LEADER} onClose={() => {}} />);
     expect(screen.getByText("hello-world-java-4vsbc")).toBeInTheDocument();
+    expect(screen.getByText("1 h 5 min")).toBeInTheDocument();
+    expect(screen.getByText("100 MB of 256 MB")).toBeInTheDocument();
     expect(await screen.findByText("250")).toBeInTheDocument();
     expect(screen.getByText("Global: 500")).toBeInTheDocument();
     expect(screen.getByText("archon.logs.memoryLines")).toBeInTheDocument();

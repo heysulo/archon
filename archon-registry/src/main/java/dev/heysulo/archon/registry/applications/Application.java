@@ -41,6 +41,8 @@ public class Application implements ConnectionCallback {
     private RunLevel runLevel;
     private String authenticationToken;
     private volatile InstanceDetails details;
+    // The latest CPU and memory the instance reported; not synced, since a new primary hears again within seconds
+    private volatile dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics metrics;
 
     public Application(String group, String name, int rank) {
         this.name = name;
@@ -118,6 +120,7 @@ public class Application implements ConnectionCallback {
                 : createRegistrationResponse(this);
         registrationResponse.setTerm(RegistryServer.getTerm());
         registrationResponse.setAuthenticationToken(this.authenticationToken);
+        registrationResponse.setMetricsAccepted(true);
         send(registrationResponse);
         dev.heysulo.archon.registry.server.LogRelays.getInstance().connected(this);
     }
@@ -165,6 +168,8 @@ public class Application implements ConnectionCallback {
     // Callers hold the namespace lock
     private void markGone() {
         ServiceRegistry.getInstance().forget(this);
+        // A stopped process uses nothing; its last figures would mislead
+        metrics = null;
         setRunLevel(RunLevel.KILLED);
         if (rank == RANK_PRIMARY) {
             ApplicationManager.getInstance().electLeader(group, name);
@@ -179,6 +184,12 @@ public class Application implements ConnectionCallback {
         }
         if (message instanceof ApplicationSyncMessage applicationSyncMessage) {
             handleApplicationSyncMessage(applicationSyncMessage);
+        }
+        if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.InstanceMetricsReport report) {
+            if (RegistryServer.getRank() == RANK_PRIMARY) {
+                setMetrics(report.getMetrics());
+            }
+            return;
         }
         if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.LogBatch batch
                 && RegistryServer.getRank() == RANK_PRIMARY) {
@@ -298,6 +309,16 @@ public class Application implements ConnectionCallback {
             return false;
         }
         return true;
+    }
+
+    /** The CPU and memory the instance last reported, or null if it has not reported since it last connected. */
+    public dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics getMetrics() {
+        return metrics;
+    }
+
+    public void setMetrics(dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics metrics) {
+        this.metrics = metrics;
+        ProcessWatchers.getInstance().metricsChanged();
     }
 
     /** Where the instance runs, as it reported when it last registered. */

@@ -1,4 +1,5 @@
 import { parseServed } from "../services/model";
+import { resourceValue } from "./resources";
 import type { ProcessInfo } from "../../api/types";
 
 /** Archon's own components, the registries and portals, rank as one primary and any number of mirrors. */
@@ -66,8 +67,8 @@ export function filterProcesses(processes: ProcessInfo[], filters: ProcessFilter
     && matches(process, filters.query));
 }
 
-export type SortColumn = "application" | "rank" | "role" | "state" | "host" | "address" | "node" | "link"
-  | "services";
+export type SortColumn = "application" | "rank" | "role" | "state" | "cpu" | "memory" | "host" | "address" | "node"
+  | "link" | "services";
 
 export interface Sort {
   column: SortColumn;
@@ -78,6 +79,10 @@ export const DEFAULT_SORT: Sort = { column: "application", descending: false };
 
 const text = (value: string | undefined) => value ?? "";
 // Missing values sort last whichever way the column is sorted
+// Processes that have not reported a figure sort last whichever way the column is sorted
+const missingLast = (a: number | undefined, b: number | undefined, descending: boolean) =>
+  a === b ? 0 : a === undefined ? (descending ? -1 : 1) : b === undefined ? (descending ? 1 : -1) : a - b;
+
 const blankLast = (a: string, b: string, descending: boolean) =>
   a === b ? 0 : !a ? (descending ? -1 : 1) : !b ? (descending ? 1 : -1) : a.localeCompare(b, undefined,
     { numeric: true });
@@ -107,6 +112,9 @@ function compareBy(column: SortColumn, a: ProcessInfo, b: ProcessInfo, descendin
       return blankLast(text(a.details?.node), text(b.details?.node), descending);
     case "link":
       return Number(b.connected) - Number(a.connected);
+    case "cpu":
+    case "memory":
+      return missingLast(resourceValue(a, column), resourceValue(b, column), descending);
     case "services":
       return a.services.length - b.services.length;
   }

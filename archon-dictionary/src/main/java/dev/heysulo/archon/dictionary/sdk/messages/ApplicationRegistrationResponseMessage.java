@@ -48,4 +48,20 @@ public class ApplicationRegistrationResponseMessage extends AuthenticatedMessage
     public void setTerm(long term) {
         this.term = term;
     }
+
+    // Absent from registries that predate metrics, which read as false
+    private boolean metricsAccepted;
+
+    /**
+     * Whether the sender understands {@link InstanceMetricsReport} and process lists carrying metrics. Senders from
+     * before metrics leave it false, so a mixed cluster never sends one a class it cannot read, which would make it
+     * close the connection.
+     */
+    public boolean isMetricsAccepted() {
+        return metricsAccepted;
+    }
+
+    public void setMetricsAccepted(boolean metricsAccepted) {
+        this.metricsAccepted = metricsAccepted;
+    }
 }

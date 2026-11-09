@@ -10,6 +10,25 @@ export interface InstanceDetails {
   node?: string;
 }
 
+/** CPU and memory an instance measured itself using; -1 for a figure it could not measure. */
+export interface InstanceMetrics {
+  /** When it measured, in milliseconds since the epoch, by its own clock. */
+  sampledAt: number;
+  /** Its share of the CPUs available to it, from 0 to 1. */
+  cpuLoad: number;
+  /** CPUs available to it: in a container, its CPU limit. */
+  processors: number;
+  /** Resident memory, on Linux. */
+  rssBytes: number;
+  /** Memory available to it: in a container, its memory limit. */
+  memoryLimit: number;
+  heapUsed: number;
+  heapMax: number;
+  nonHeapUsed: number;
+  threads: number;
+  uptimeMillis: number;
+}
+
 /** One application instance as the primary registry sees it. */
 export interface ProcessInfo {
   group: string;
@@ -26,6 +45,8 @@ export interface ProcessInfo {
   /** Ids of the services it serves with TLS; absent from registries that predate TLS. */
   secureServices?: string[];
   details?: InstanceDetails;
+  /** Its latest CPU and memory use; absent until it reports, and for stopped processes. */
+  metrics?: InstanceMetrics;
 }
 
 export type PortalRole = "primary" | "mirror" | "unregistered";

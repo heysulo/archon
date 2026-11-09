@@ -70,6 +70,7 @@ public class MainApplication {
         registryServer.initialize();
         LeaderElectorClient.getInstance().start(Constants.REGISTRY_LEADER_ELECTION_MAX_CONNECTION_ATTEMPTS);
         registryServer.start();
+        dev.heysulo.archon.registry.server.RegistryMetrics.start();
         LOGGER.info("Archon Registry startup complete.");
     }
 }

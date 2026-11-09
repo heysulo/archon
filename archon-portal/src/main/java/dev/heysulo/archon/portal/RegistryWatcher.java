@@ -113,7 +113,7 @@ final class RegistryWatcher implements ClientCallback, ProcessFeed {
         location = primary;
         lastHeardNanos = System.nanoTime();
         LOGGER.info("Watching the process list of the primary registry at {}", primary);
-        fresh.send(new ProcessWatchRequest());
+        fresh.send(new ProcessWatchRequest().acceptingMetrics());
         // A new primary knows nothing of the logs being watched through the last one
         logWatchers.keySet().forEach(key -> sendLogWatch(fresh, key, true));
     }
@@ -133,7 +133,7 @@ final class RegistryWatcher implements ClientCallback, ProcessFeed {
             return;
         }
         try {
-            current.send(new ProcessListRequest(CHECK_REQUEST_ID));
+            current.send(new ProcessListRequest(CHECK_REQUEST_ID).acceptingMetrics());
         } catch (RuntimeException e) {
             LOGGER.debug("Check of the registry failed: {}", e.getMessage());
         }

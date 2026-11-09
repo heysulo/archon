@@ -222,6 +222,7 @@ sequenceDiagram
 | `CertificateRequest` / `CertificateResponse` | instance → any registry | Join or renew a certificate ([§9.4](#94-joining-and-renewal)). |
 | `ProcessLogWatch` / `ProcessLogBatch` | portal ↔ primary | Watch an instance's live logs ([§10](#10-live-logs)). |
 | `LogStreamControl` / `LogBatch` | primary ↔ instance | Start or stop an instance's log stream; its lines. |
+| `InstanceMetricsReport` | instance or mirror → primary | CPU and memory use, every 5 s ([§6.5](#65-resource-use)). |
 | `VoteRequest`, `VoteResponse`, `LeaderElectionMessage`, `LeaderStatusMessage`, `PrimaryStanding`, `RegistryRegistration…` | registry ↔ registry | Election, status and rival resolution. |
 | `ApplicationSyncMessage`, `StateSnapshotComplete` | primary → mirror | State synchronisation. |
 
@@ -332,6 +333,22 @@ Every application has at most one rank-1 instance, its leader.
 * **A promotion that cannot be delivered** (the candidate's connection fails) marks it `KILLED` and tries the next.
 
 The promoted instance's old rank becomes free. Other instances keep their ranks.
+
+### 6.5 Resource use
+
+Every SDK instance measures itself every 5 s and reports to the primary with `InstanceMetricsReport`: its share of
+the CPUs available to it, those CPUs (its container's limit), resident memory (on Linux, from `/proc/self/status`),
+the memory available to it (its container's limit), heap used and maximum, memory outside the heap, live threads and
+uptime. The JVM's management beans are container aware, so the limits are the container's. Registries measure
+themselves the same way: the primary keeps its own figures, and mirrors report to it like instances.
+
+The primary keeps the latest report with the instance's record, drops it when the instance stops, and includes it in
+the process list. Reports from many instances share one push to watchers, at most every 2 s. Reports are not synced
+to mirrors: a new primary hears them again within 5 s.
+
+Compatibility: registries say they accept reports in their lookup and registration answers, and portals ask for
+metrics in their process list requests. An older registry is never sent a report and an older portal never a list
+with metrics, since an unknown class makes DataBridge close the connection.
 
 ## 7. Services
 
@@ -632,7 +649,7 @@ and serves the full API. Sessions live in the database, so a browser can be serv
 
 | Page | What it does |
 |---|---|
-| Processes | Every instance in one sortable, filterable table, updated live. Services in green when served over TLS, red when not. Click an instance for its details and every configuration it sees, with where each comes from, to edit, override for the application or remove an override. Watch its logs live. |
+| Processes | Every instance in one sortable, filterable table, updated live, with its CPU and memory use. Services in green when served over TLS, red when not. Click an instance for its details and every configuration it sees, with where each comes from, to edit, override for the application or remove an override. Watch its logs live. |
 | Applications | Define and remove applications; assign services; manage join tokens and see the CA fingerprint. |
 | Services | Define services, their owner, port offset and mode. Running services are locked. |
 | Configurations | Every configuration at every level, searchable and paged. |
@@ -806,6 +823,7 @@ variables in [§14](#14-configuration-reference), and with TLS on give it the CA
 | Records of instances that never return marked `KILLED` | 20 s after the new primary takes over |
 | A service or definition change reaching registries | ≤ 10 s |
 | A configuration change reaching instances | immediately; the 30 s refresh catches anything missed |
+| CPU and memory in the portal | every 5 s, shown within about 2 s of a report |
 | An instance stopping its log stream after the viewer closes | up to about 45 s (the portal notices on its next write) |
 
 ### 15.3 Why an instance was stopped

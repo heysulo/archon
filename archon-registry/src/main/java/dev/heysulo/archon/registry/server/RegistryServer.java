@@ -137,6 +137,10 @@ public class RegistryServer implements ServerCallback {
             RegistryTls.current().handle(connection, request);
             return;
         }
+        if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.InstanceMetricsReport) {
+            // From an instance not registered on this connection yet, as just after a reconnect: the next one counts
+            return;
+        }
         if (!admitted(connection, message)) {
             return;
         }
@@ -152,6 +156,7 @@ public class RegistryServer implements ServerCallback {
         } else if (message instanceof PrimaryRegistryLookupMessage) {
             PrimaryRegistryLookupResponseMessage response = new PrimaryRegistryLookupResponseMessage(getRank());
             response.setTerm(getTerm());
+            response.setMetricsAccepted(true);
             connection.send(response);
             return;
         }
@@ -169,9 +174,10 @@ public class RegistryServer implements ServerCallback {
             // Lookups need no registration, so tools and unregistered clients can find services too
             connection.send(ServiceRegistry.getInstance().lookup(lookup));
         } else if (message instanceof ProcessListRequest request) {
-            connection.send(new ProcessListResponse(request.getRequestId(), getTerm(), listProcesses()));
-        } else if (message instanceof ProcessWatchRequest) {
-            ProcessWatchers.getInstance().watch(connection);
+            connection.send(new ProcessListResponse(request.getRequestId(), getTerm(),
+                    listProcesses(request.isMetricsAccepted())));
+        } else if (message instanceof ProcessWatchRequest watch) {
+            ProcessWatchers.getInstance().watch(connection, watch.isMetricsAccepted());
         } else if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.ProcessLogWatch watch) {
             handleLogWatch(connection, watch);
         } else if (message instanceof VerifyInstanceRequest request) {
@@ -433,13 +439,18 @@ public class RegistryServer implements ServerCallback {
 
     /** Every application instance this registry knows, in any state, ordered by application and rank. */
     List<ProcessInfo> listProcesses() {
+        return listProcesses(true);
+    }
+
+    /** @param withMetrics whether to include CPU and memory, which watchers from before metrics cannot read */
+    List<ProcessInfo> listProcesses(boolean withMetrics) {
         ServiceRegistry services = ServiceRegistry.getInstance();
         return applicationManager.findAllKnownApplications().stream()
                 // This registry's own record has no connection to itself, but it is plainly present
                 .map(app -> new ProcessInfo(app.getGroup(), app.getName(), app.getRank(),
                         String.valueOf(app.getRunLevel()), app.isRunning(),
                         app == applicationRegistry || app.isConnected(), services.servicesOf(app), app.getDetails(),
-                        services.secureServicesOf(app)))
+                        services.secureServicesOf(app), withMetrics && app.isRunning() ? app.getMetrics() : null))
                 .sorted(java.util.Comparator.comparing(ProcessInfo::group)
                         .thenComparing(ProcessInfo::name)
                         .thenComparingInt(ProcessInfo::rank))
@@ -493,7 +504,11 @@ public class RegistryServer implements ServerCallback {
         }
     }
 
+    // Whether the primary this mirror follows said it accepts metrics; an older one would drop the connection
+    private static volatile boolean primaryAcceptsMetrics;
+
     public static void updateApplicationData(Connection connection, RegistryRegistrationResponse message) {
+        primaryAcceptsMetrics = message.isMetricsAccepted();
         setRank(message.getRank());
         applicationRegistry.setName(message.getApplicationName());
         applicationRegistry.setGroup(message.getApplicationGroup());
@@ -684,6 +699,18 @@ public class RegistryServer implements ServerCallback {
                 .filter(app -> app.getRunLevel() == RunLevel.RUNNING)
                 .filter(Application::isConnected)
                 .toList();
+    }
+
+    /**
+     * This registry's own CPU and memory: kept on its own record while primary, or sent to the primary while a mirror,
+     * like any instance's.
+     */
+    static void reportOwnMetrics(dev.heysulo.archon.dictionary.sdk.services.InstanceMetrics metrics) {
+        if (getRank() == RANK_PRIMARY) {
+            applicationRegistry.setMetrics(metrics);
+        } else if (primaryAcceptsMetrics && primaryRegistry.isConnected()) {
+            primaryRegistry.send(new dev.heysulo.archon.dictionary.sdk.messages.InstanceMetricsReport(metrics));
+        }
     }
 
     /** Whether a record is this registry's own, as the primary keeps one for itself. */

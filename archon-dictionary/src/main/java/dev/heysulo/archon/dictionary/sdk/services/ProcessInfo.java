@@ -13,9 +13,11 @@ import java.util.List;
  * @param services  the services it serves, as {@code id@host:port}
  * @param details   where it runs, or null if unknown
  * @param secureServices the ids of those it serves with TLS. Empty from registries that predate TLS.
+ * @param metrics   its latest CPU and memory use, or null if it has not reported any
  */
 public record ProcessInfo(String group, String name, int rank, String runLevel, boolean running, boolean connected,
-                          List<String> services, InstanceDetails details, List<String> secureServices)
+                          List<String> services, InstanceDetails details, List<String> secureServices,
+                          InstanceMetrics metrics)
         implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
@@ -28,6 +30,11 @@ public record ProcessInfo(String group, String name, int rank, String runLevel, 
 
     public ProcessInfo(String group, String name, int rank, String runLevel, boolean running, boolean connected,
                        List<String> services, InstanceDetails details) {
-        this(group, name, rank, runLevel, running, connected, services, details, List.of());
+        this(group, name, rank, runLevel, running, connected, services, details, List.of(), null);
+    }
+
+    public ProcessInfo(String group, String name, int rank, String runLevel, boolean running, boolean connected,
+                       List<String> services, InstanceDetails details, List<String> secureServices) {
+        this(group, name, rank, runLevel, running, connected, services, details, secureServices, null);
     }
 }

@@ -3,7 +3,7 @@ import { ActionIcon, Alert, Badge, Box, Button, Code, Divider, Drawer, Group, Lo
 import { notifications } from "@mantine/notifications";
 import { IconArrowBackUp, IconDots, IconFileText, IconLock, IconPencil, IconPlus } from "@tabler/icons-react";
 import { useState, type ReactNode } from "react";
-import type { ProcessInfo } from "../../../api/types";
+import type { InstanceMetrics, ProcessInfo } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthProvider";
 import { PERMISSIONS } from "../../../auth/permissions";
 import { ConfigFormModal } from "../../configs/ConfigFormModal";
@@ -11,6 +11,8 @@ import { useConfigMutations, useEffectiveConfigs, type Config, type ConfigInput,
   from "../../configs/configsApi";
 import { LEVEL_COLORS, LEVEL_LABELS } from "../../configs/model";
 import { applicationOf, isSecure, roleOf, serviceLabel, stateTone } from "../model";
+import { CpuCell, MemoryCell } from "../ResourceCells";
+import { formatBytes, formatUptime } from "../resources";
 import { editNotice, overridePreset, sourceLabel } from "./detailsModel";
 
 interface Props {
@@ -70,6 +72,7 @@ function Details({ process, onLogs }: { process: ProcessInfo; onLogs?: (process:
           </Group>
         ) : "None"}
       </Field>
+      <Resources metrics={process.metrics} />
       {onLogs && process.running && process.connected && (
         <Group>
           <Button variant="default" leftSection={<IconFileText size={16} />} onClick={() => onLogs(process)}>
@@ -85,6 +88,36 @@ function Details({ process, onLogs }: { process: ProcessInfo; onLogs?: (process:
         </>
       )}
     </Stack>
+  );
+}
+
+/** What the instance last reported using, refreshed every few seconds. */
+function Resources({ metrics }: { metrics: InstanceMetrics | undefined }) {
+  if (!metrics) {
+    return (
+      <Field label="Resources">
+        <Text size="sm" c="dimmed">Not reported yet</Text>
+      </Field>
+    );
+  }
+  const cpus = metrics.processors === 1 ? "1 CPU" : `${metrics.processors} CPUs`;
+  return (
+    <div>
+      <Text size="xs" c="dimmed" mb={4}>Resources, reported every few seconds</Text>
+      <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md">
+        <Field label={`CPU, of ${cpus}`}><CpuCell metrics={metrics} /></Field>
+        <Field label={metrics.rssBytes >= 0 ? "Resident memory" : "Memory (heap)"}>
+          <MemoryCell metrics={metrics} />
+        </Field>
+        <Field label="Memory limit">{formatBytes(metrics.memoryLimit)}</Field>
+        <Field label="Heap">
+          {formatBytes(metrics.heapUsed)}{metrics.heapMax > 0 ? ` of ${formatBytes(metrics.heapMax)}` : ""}
+        </Field>
+        <Field label="Outside the heap">{formatBytes(metrics.nonHeapUsed)}</Field>
+        <Field label="Threads">{metrics.threads}</Field>
+        <Field label="Uptime">{formatUptime(metrics.uptimeMillis)}</Field>
+      </SimpleGrid>
+    </div>
   );
 }
 

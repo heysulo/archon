@@ -39,7 +39,8 @@ Once your application calls `ArchonInterface.initialize`, the SDK:
 * serves your services on the right port and tells the registry, so clients can find them;
 * connects your clients to services and follows them across failovers;
 * keeps every configuration your application sees in memory, and tells you when one changes;
-* captures your log lines so operators can watch them live in the portal.
+* captures your log lines so operators can watch them live in the portal;
+* reports the process's CPU and memory use every 5 seconds, for the portal's process view.
 
 Your application decides what each role does, and tells the SDK when it is ready for its rank.
 
