@@ -109,12 +109,14 @@ public class Application implements ConnectionCallback {
 
     public void handleRegistration(Connection connection) {
         setConnection(connection);
+        // Before the run level changes, which syncs the record to mirrors: a mirror promoted while the instance is
+        // still starting must know the token it will re-register with, or it refuses it as another instance's
+        this.authenticationToken = authenticationManager.generateSecureToken();
         setRunLevel(RunLevel.STARTING);
         ApplicationRegistrationResponseMessage registrationResponse = isRegistryInstance()
                 ? createRegistryRegistrationResponse(this)
                 : createRegistrationResponse(this);
         registrationResponse.setTerm(RegistryServer.getTerm());
-        this.authenticationToken = authenticationManager.generateSecureToken();
         registrationResponse.setAuthenticationToken(this.authenticationToken);
         send(registrationResponse);
     }

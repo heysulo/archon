@@ -59,6 +59,25 @@ public class RegistryReadinessTest {
     }
 
     @Test
+    public void mirrorsLearnAStartingInstancesToken() {
+        RegistryServer.setRank(RANK_PRIMARY);
+        Application mirror = ApplicationManager.getInstance().createApplication("Archon", "Registry", 8);
+        FakeConnection toMirror = new FakeConnection();
+        mirror.setConnection(toMirror);
+        mirror.setRunLevel(dev.heysulo.archon.dictionary.sdk.enums.RunLevel.RUNNING);
+        Application starting = ApplicationManager.getInstance().createApplication("Ready", "Starting", 3);
+        // A rank reused after an instance that held it died, so an old token is on record
+        starting.setAuthenticationToken("the previous instance's");
+
+        starting.handleRegistration(new FakeConnection());
+
+        ApplicationSyncMessage synced = toMirror.last(ApplicationSyncMessage.class);
+        Assert.assertEquals(synced.getRunLevel(), dev.heysulo.archon.dictionary.sdk.enums.RunLevel.STARTING);
+        Assert.assertEquals(synced.getAuthenticationToken(), starting.getAuthenticationToken(),
+                "a mirror promoted before the instance acknowledges must accept it back");
+    }
+
+    @Test
     public void aMirrorIsReadyOnceTheSnapshotIsComplete() {
         RegistryServer.setRank(2);
         RegistryReadiness.notReady("waiting for the primary's state");
