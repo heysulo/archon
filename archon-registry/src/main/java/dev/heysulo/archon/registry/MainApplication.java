@@ -3,6 +3,7 @@ package dev.heysulo.archon.registry;
 import dev.heysulo.archon.registry.client.LeaderElectorClient;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.server.RegistryServer;
+import dev.heysulo.archon.registry.applications.ApplicationDefinitions;
 import dev.heysulo.archon.registry.db.Database;
 import dev.heysulo.archon.registry.services.ServiceCatalog;
 import dev.heysulo.archon.registry.services.ServiceCatalogWatcher;
@@ -42,9 +43,17 @@ public class MainApplication {
         Optional<Database> database = Database.fromEnvironment();
         if (database.isPresent()) {
             ServiceRegistry.getInstance().setCatalog(ServiceCatalog.load(database.get()));
+            try {
+                ApplicationDefinitions.prepare(database.get());
+                ApplicationDefinitions.setCurrent(ApplicationDefinitions.load(database.get()));
+            } catch (java.sql.SQLException e) {
+                throw new IllegalStateException("Cannot read application definitions: " + e.getMessage(), e);
+            }
+            LOGGER.info("{} applications are defined", ApplicationDefinitions.current().keys().size());
             new ServiceCatalogWatcher(database.get(), ServiceRegistry.getInstance()).start();
         } else {
-            LOGGER.warn("{} is not set. No services are defined", Database.URL_ENV);
+            LOGGER.warn("{} is not set. No services are defined, and every application may register",
+                    Database.URL_ENV);
         }
         RegistryServer registryServer = RegistryServer.getInstance();
         registryServer.initialize();

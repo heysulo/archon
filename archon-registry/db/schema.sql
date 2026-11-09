@@ -36,3 +36,15 @@ CREATE TABLE IF NOT EXISTS services (
     CONSTRAINT chk_services_app_name_not_blank CHECK (CHAR_LENGTH(TRIM(app_name)) > 0),
     CONSTRAINT chk_services_port_offset_range CHECK (port_offset <= 65534)
 ) ENGINE = InnoDB;
+
+-- The applications allowed to register, each a group and name. An instance of any other application is told to
+-- terminate. Archon's own components (Archon:Registry, Archon:Portal, Archon:Config) need no row. Registries create
+-- this table if it is missing, defining every application that owns a service, and read it again every 10 seconds.
+CREATE TABLE IF NOT EXISTS application_definitions (
+    app_group   VARCHAR(128) NOT NULL,
+    app_name    VARCHAR(128) NOT NULL,
+    description VARCHAR(255) NOT NULL DEFAULT '',
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (app_group, app_name)
+) ENGINE = InnoDB;

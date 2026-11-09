@@ -5,6 +5,9 @@ public final class ApplicationTermination {
     public static final String REASON_RANK_UNAVAILABLE_FOR_RE_REGISTRATION =
             "Provided rank is not available re-registration";
 
+    /** Only defined applications may register; define it in the portal first. */
+    public static final String REASON_UNDEFINED_APPLICATION = "Application is not defined";
+
     private ApplicationTermination() {
     }
 }

@@ -1,6 +1,7 @@
 package dev.heysulo.archon.registry.services;
 
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
+import dev.heysulo.archon.registry.applications.ApplicationDefinitions;
 import dev.heysulo.archon.registry.db.Database;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +11,7 @@ import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -18,7 +20,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Reads the services table again every few seconds, so services added, changed or removed in the portal take
+ * Reads the services and application definitions again every few seconds, so changes made in the portal take
  * effect without restarting the registries. Every registry watches on its own, so a promoted mirror is current
  * too. A failed read keeps the services already loaded.
  */
@@ -48,8 +50,10 @@ public final class ServiceCatalogWatcher {
     // Runs on the scheduler. An exception would cancel the schedule, so none may escape.
     void reload() {
         ServiceCatalog next;
+        ApplicationDefinitions definitions;
         try (Connection connection = database.connect()) {
             next = ServiceCatalog.load(connection);
+            definitions = ApplicationDefinitions.load(connection);
         } catch (SQLException | RuntimeException e) {
             String failure = e.getMessage();
             if (!Objects.equals(failure, lastFailure)) {
@@ -61,6 +65,11 @@ public final class ServiceCatalogWatcher {
         if (lastFailure != null) {
             lastFailure = null;
             LOGGER.info("Reading services again");
+        }
+        String defined = describeDefinitionChanges(ApplicationDefinitions.current().keys(), definitions.keys());
+        if (!defined.isEmpty()) {
+            ApplicationDefinitions.setCurrent(definitions);
+            LOGGER.info("Application definitions changed: {}", defined);
         }
         String changes = describeChanges(registry.catalog().all(), next.all());
         if (!changes.isEmpty()) {
@@ -91,6 +100,18 @@ public final class ServiceCatalogWatcher {
         StringBuilder text = new StringBuilder();
         append(text, "added", added);
         append(text, "changed", changed);
+        append(text, "removed", removed);
+        return text.toString();
+    }
+
+    /** Which applications were defined and which no longer are, or empty. */
+    static String describeDefinitionChanges(Set<String> before, Set<String> after) {
+        TreeSet<String> added = new TreeSet<>(after);
+        added.removeAll(before);
+        TreeSet<String> removed = new TreeSet<>(before);
+        removed.removeAll(after);
+        StringBuilder text = new StringBuilder();
+        append(text, "added", added);
         append(text, "removed", removed);
         return text.toString();
     }

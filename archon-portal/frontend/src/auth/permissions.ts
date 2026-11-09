@@ -1,6 +1,8 @@
 /** Permission keys, matching the portal's Permission enum. Roles grant them; "*" grants every one. */
 export const PERMISSIONS = {
   processesView: "processes:view",
+  applicationsView: "applications:view",
+  applicationsManage: "applications:manage",
   usersView: "users:view",
   usersManage: "users:manage",
   rolesView: "roles:view",

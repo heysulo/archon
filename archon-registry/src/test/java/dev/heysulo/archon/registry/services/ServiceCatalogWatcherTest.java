@@ -2,8 +2,10 @@ package dev.heysulo.archon.registry.services;
 
 import dev.heysulo.archon.dictionary.sdk.enums.ServiceMode;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
+import dev.heysulo.archon.registry.applications.ApplicationDefinitions;
 import dev.heysulo.archon.registry.db.Database;
 import org.testng.Assert;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
@@ -27,9 +29,18 @@ public class ServiceCatalogWatcherTest {
                 + "port_offset INT NOT NULL, app_group VARCHAR(128) NOT NULL, app_name VARCHAR(128) NOT NULL, "
                 + "mode VARCHAR(32) NOT NULL)");
         execute("INSERT INTO services VALUES ('ping', 'Ping', 0, 'Group', 'Application', 'PRIMARY_MIRROR')");
+        execute("CREATE TABLE application_definitions (app_group VARCHAR(128) NOT NULL, app_name VARCHAR(128) NOT "
+                + "NULL, PRIMARY KEY (app_group, app_name))");
+        execute("INSERT INTO application_definitions VALUES ('Group', 'Application')");
         registry = new ServiceRegistry();
         registry.setCatalog(ServiceCatalog.load(database));
         watcher = new ServiceCatalogWatcher(database, registry);
+    }
+
+    // Reloading also loads definitions, which would refuse other tests' made-up applications
+    @AfterMethod
+    public void allowEveryone() {
+        ApplicationDefinitions.setCurrent(ApplicationDefinitions.allowAll());
     }
 
     @Test
@@ -68,6 +79,17 @@ public class ServiceCatalogWatcherTest {
         watcher.reload();
         Assert.assertTrue(registry.catalog().find("echo").isPresent());
         Assert.assertTrue(registry.catalog().find("ping").isPresent());
+    }
+
+    @Test
+    public void picksUpApplicationDefinitions() throws Exception {
+        ApplicationDefinitions.setCurrent(ApplicationDefinitions.load(database));
+        execute("INSERT INTO application_definitions VALUES ('Shop', 'Cart')");
+        watcher.reload();
+        Assert.assertTrue(ApplicationDefinitions.current().isDefined("Shop", "Cart"));
+        execute("DELETE FROM application_definitions WHERE app_group = 'Group'");
+        watcher.reload();
+        Assert.assertFalse(ApplicationDefinitions.current().isDefined("Group", "Application"));
     }
 
     @Test

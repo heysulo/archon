@@ -9,6 +9,7 @@ import dev.heysulo.archon.dictionary.sdk.services.ProcessInfo;
 import dev.heysulo.archon.portal.auth.AuthService;
 import dev.heysulo.archon.portal.auth.PasswordHasher;
 import dev.heysulo.archon.portal.auth.Permission;
+import dev.heysulo.archon.portal.applications.ApplicationStore;
 import dev.heysulo.archon.portal.auth.TestDatabase;
 import dev.heysulo.archon.portal.services.ServiceStore;
 import dev.heysulo.archon.sdk.config.ConfigAdmin;
@@ -68,11 +69,17 @@ public class PortalServerTest {
                 + "mode VARCHAR(32) NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 + "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
                 + "CONSTRAINT uq_services_app_port UNIQUE (app_group, app_name, port_offset))");
+        database.execute("CREATE TABLE application_definitions (app_group VARCHAR(128) NOT NULL, "
+                + "app_name VARCHAR(128) NOT NULL, description VARCHAR(255) NOT NULL DEFAULT '', "
+                + "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                + "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (app_group, app_name))");
+        ApplicationStore applications = new ApplicationStore(database.dataSource());
         AuthService auth = new AuthService(database.store(), new PasswordHasher(1_000), Clock.systemUTC());
         auth.completeSetup(auth.createSetupToken().orElseThrow(), "admin", "Admin", ADMIN_PASSWORD);
         server = new PortalServer(feed, snapshot -> snapshot.servedBy(identity), "/portal-test", new AuthApi(auth),
                 new ConfigApi(configs, auth::authenticate),
-                new ServicesApi(new ServiceStore(database.dataSource()), feed, auth::authenticate), auth::authenticate);
+                new ServicesApi(new ServiceStore(database.dataSource(), applications), feed, auth::authenticate),
+                new ApplicationsApi(applications, feed, auth::authenticate), auth::authenticate);
         server.start(port);
         adminCookie = signIn("admin", ADMIN_PASSWORD);
     }
@@ -87,6 +94,12 @@ public class PortalServerTest {
     public void registryUp() throws java.sql.SQLException {
         configs.clear();
         database.execute("DELETE FROM services");
+        database.execute("DELETE FROM application_definitions");
+        for (String application : List.of("Group:Application", "Shop:Search", "Library:Catalogue")) {
+            String[] parts = application.split(":");
+            database.execute("INSERT INTO application_definitions (app_group, app_name) VALUES ('" + parts[0]
+                    + "', '" + parts[1] + "')");
+        }
         database.execute("INSERT INTO services (id, name, port_offset, app_group, app_name, mode) VALUES "
                 + "('archon-config', 'Archon configuration', 0, 'Archon', 'Config', 'PRIMARY_MIRROR')");
         configs.failure = null;
@@ -298,7 +311,8 @@ public class PortalServerTest {
         Assert.assertEquals(post("/api/services", base, adminCookie, true).statusCode(), 201);
         // Another application entirely: offsets are unique across every service
         HttpResponse<String> clash = post("/api/services", base.replace("\"search\"", "\"index\"")
-                .replace("\"Shop\"", "\"Library\""), adminCookie, true);
+                .replace("\"Shop\"", "\"Library\"").replace("\"application\":\"Search\"",
+                        "\"application\":\"Catalogue\""), adminCookie, true);
         Assert.assertEquals(clash.statusCode(), 409, "same offset, other application");
         Assert.assertTrue(clash.body().contains("Port offset 2 is taken by search"), clash.body());
         Assert.assertEquals(post("/api/services", base.replace("\"search\"", "\"archon-clash\"")
@@ -358,6 +372,65 @@ public class PortalServerTest {
         Assert.assertEquals(send("DELETE", "/api/services/anything", null, sam).statusCode(), 403);
         Assert.assertEquals(get("/api/services", null).statusCode(), 401);
         Assert.assertEquals(post("/api/services", "{}", adminCookie, false).statusCode(), 403, "other sites");
+    }
+
+    @Test
+    public void refusesServicesOfUndefinedApplications() throws Exception {
+        HttpResponse<String> refused = post("/api/services", "{\"id\":\"orphan\",\"name\":\"Orphan\","
+                + "\"portOffset\":30,\"group\":\"Nowhere\",\"application\":\"Nobody\",\"mode\":\"LOAD_BALANCE\"}",
+                adminCookie, true);
+        Assert.assertEquals(refused.statusCode(), 400);
+        Assert.assertTrue(refused.body().contains("not a defined application"), refused.body());
+    }
+
+    // ---------------- application definitions ----------------
+
+    @Test
+    public void definesApplications() throws Exception {
+        HttpResponse<String> created = post("/api/applications", "{\"group\":\" Shop \",\"name\":\"Cart\","
+                + "\"description\":\"Baskets\"}", adminCookie, true);
+        Assert.assertEquals(created.statusCode(), 201, created.body());
+        Assert.assertEquals(post("/api/applications", "{\"group\":\"Shop\",\"name\":\"Cart\"}", adminCookie,
+                true).statusCode(), 409, "already defined");
+
+        HttpResponse<String> listed = get("/api/applications", adminCookie);
+        Assert.assertTrue(listed.body().contains("{\"group\":\"Archon\",\"name\":\"Portal\""), listed.body());
+        Assert.assertTrue(listed.body().contains("\"name\":\"Cart\",\"description\":\"Baskets\""), listed.body());
+
+        HttpResponse<String> updated = send("PUT", "/api/applications/Shop/Cart", "{\"description\":\"Carts\"}",
+                adminCookie);
+        Assert.assertEquals(updated.statusCode(), 200, updated.body());
+        Assert.assertTrue(updated.body().contains("\"description\":\"Carts\""), updated.body());
+
+        Assert.assertEquals(send("DELETE", "/api/applications/Shop/Cart", null, adminCookie).statusCode(), 204);
+        Assert.assertEquals(send("DELETE", "/api/applications/Shop/Cart", null, adminCookie).statusCode(), 404);
+    }
+
+    @Test
+    public void refusesInvalidDefinitions() throws Exception {
+        Assert.assertEquals(post("/api/applications", "{\"group\":\"Archon\",\"name\":\"Extra\"}",
+                adminCookie, true).statusCode(), 400, "Archon's group");
+        Assert.assertEquals(post("/api/applications", "{\"group\":\"Has Space\",\"name\":\"X\"}",
+                adminCookie, true).statusCode(), 400);
+        Assert.assertEquals(send("DELETE", "/api/applications/Archon/Portal", null, adminCookie).statusCode(), 400);
+    }
+
+    // LEADER runs as Group / Application: removing its definition would refuse it on its next reconnect
+    @Test
+    public void keepsTheDefinitionsOfRunningApplications() throws Exception {
+        HttpResponse<String> refused = send("DELETE", "/api/applications/Group/Application", null, adminCookie);
+        Assert.assertEquals(refused.statusCode(), 409, refused.body());
+        Assert.assertTrue(refused.body().contains("1 instance running"), refused.body());
+    }
+
+    @Test
+    public void keepsTheDefinitionsOfApplicationsOwningServices() throws Exception {
+        Assert.assertEquals(post("/api/services", "{\"id\":\"search\",\"name\":\"Search\",\"portOffset\":12,"
+                + "\"group\":\"Shop\",\"application\":\"Search\",\"mode\":\"LOAD_BALANCE\"}", adminCookie,
+                true).statusCode(), 201);
+        HttpResponse<String> refused = send("DELETE", "/api/applications/Shop/Search", null, adminCookie);
+        Assert.assertEquals(refused.statusCode(), 409, refused.body());
+        Assert.assertTrue(refused.body().contains("owns search"), refused.body());
     }
 
     // ---------------- processes ----------------

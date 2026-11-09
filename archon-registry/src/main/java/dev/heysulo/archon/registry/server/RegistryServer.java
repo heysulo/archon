@@ -15,6 +15,7 @@ import dev.heysulo.archon.dictionary.sdk.services.ProcessInfo;
 import dev.heysulo.archon.dictionary.sdk.messages.ServiceLookupMessage;
 import dev.heysulo.archon.dictionary.sdk.enums.RunLevel;
 import dev.heysulo.archon.registry.applications.Application;
+import dev.heysulo.archon.registry.applications.ApplicationDefinitions;
 import dev.heysulo.archon.registry.applications.ApplicationManager;
 import dev.heysulo.archon.registry.applications.RegistryApplication;
 import dev.heysulo.archon.registry.client.LeaderElectorClient;
@@ -147,6 +148,15 @@ public class RegistryServer implements ServerCallback {
 
     private void handleApplicationRegistrationMessage(Connection connection,
             ApplicationRegistrationMessage registrationMessage) {
+        String group = registrationMessage.getGroupName();
+        String name = registrationMessage.getApplicationName();
+        // Checked on every registration and re-registration, so a removed definition admits no one new
+        if (!ApplicationDefinitions.current().isDefined(group, name)) {
+            LOGGER.warn("Refused {}:{} from {}: the application is not defined", group, name,
+                    connection.getRemoteAddress());
+            askToTerminate(connection, ApplicationTermination.REASON_UNDEFINED_APPLICATION);
+            return;
+        }
         if (registrationMessage.getRank() == RANK_UNKNOWN) {
             registerNewApplicationInstance(registrationMessage.getGroupName(),
                     registrationMessage.getApplicationName(), detailsOf(registrationMessage, connection), connection);

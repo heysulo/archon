@@ -9,6 +9,9 @@ import java.util.Optional;
  */
 public enum Permission {
     PROCESSES_VIEW("processes:view", "See running processes"),
+    APPLICATIONS_VIEW("applications:view", "See which applications are defined"),
+    APPLICATIONS_MANAGE("applications:manage", "Define applications, so their instances may register, and remove "
+            + "definitions"),
     USERS_VIEW("users:view", "See users and the roles they hold"),
     USERS_MANAGE("users:manage", "Create, change and delete users and assign them roles"),
     ROLES_VIEW("roles:view", "See roles and their permissions"),

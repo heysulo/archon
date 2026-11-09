@@ -22,8 +22,9 @@ export type ServiceInput = Pick<Service, "id" | "name" | "portOffset" | "group" 
 
 const SERVICES = ["services"] as const;
 
-export function useServices() {
-  return useQuery({ queryKey: SERVICES, queryFn: () => api<Service[]>("/api/services") });
+/** @param enabled false skips the request, for those who may not see services */
+export function useServices(enabled = true) {
+  return useQuery({ queryKey: SERVICES, queryFn: () => api<Service[]>("/api/services"), enabled });
 }
 
 export function useServiceMutations() {

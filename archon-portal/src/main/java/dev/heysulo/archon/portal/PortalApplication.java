@@ -3,6 +3,7 @@ package dev.heysulo.archon.portal;
 import dev.heysulo.archon.portal.auth.AuthService;
 import dev.heysulo.archon.portal.auth.AuthStore;
 import dev.heysulo.archon.portal.auth.PasswordHasher;
+import dev.heysulo.archon.portal.applications.ApplicationStore;
 import dev.heysulo.archon.portal.db.PortalDatabase;
 import dev.heysulo.archon.portal.services.ServiceStore;
 import dev.heysulo.archon.sdk.ArchonInterface;
@@ -48,10 +49,11 @@ public final class PortalApplication {
         PortalIdentity identity = new PortalIdentity();
         RegistryWatcher registry = new RegistryWatcher();
         PortalConfigs configs = new PortalConfigs();
+        ApplicationStore applications = new ApplicationStore(database.dataSource());
         PortalServer server = new PortalServer(registry, snapshot -> snapshot.servedBy(identity), "/portal",
                 new AuthApi(auth), new ConfigApi(configs, auth::authenticate),
-                new ServicesApi(new ServiceStore(database.dataSource()), registry, auth::authenticate),
-                auth::authenticate);
+                new ServicesApi(new ServiceStore(database.dataSource(), applications), registry, auth::authenticate),
+                new ApplicationsApi(applications, registry, auth::authenticate), auth::authenticate);
         // Serving first: the page reports registry trouble itself, and registering waits until a primary answers
         server.start(port);
         registry.start();

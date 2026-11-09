@@ -26,6 +26,7 @@ const ACTION_LABELS: Record<string, string> = { view: "View", manage: "Modify" }
 // In the order the portal's menu lists them; features without a label follow, as the portal lists them
 const FEATURE_LABELS: Record<string, string> = {
   processes: "Processes",
+  applications: "Applications",
   services: "Services",
   configs: "Configurations",
   users: "Users",

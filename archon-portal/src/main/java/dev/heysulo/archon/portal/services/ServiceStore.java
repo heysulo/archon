@@ -1,5 +1,6 @@
 package dev.heysulo.archon.portal.services;
 
+import dev.heysulo.archon.portal.applications.ApplicationStore;
 import dev.heysulo.archon.portal.auth.AuthException;
 
 import javax.sql.DataSource;
@@ -30,9 +31,20 @@ public final class ServiceStore {
     private static final String COLUMNS = "id, name, port_offset, app_group, app_name, mode, created_at, updated_at";
 
     private final DataSource dataSource;
+    private final ApplicationStore applications;
 
-    public ServiceStore(DataSource dataSource) {
+    /** @param applications to check a service's owner is a defined application */
+    public ServiceStore(DataSource dataSource, ApplicationStore applications) {
         this.dataSource = dataSource;
+        this.applications = applications;
+    }
+
+    // Only a defined application's instances can register, so only they could ever serve it
+    private void requireDefinedOwner(ServiceRecord service) {
+        if (!applications.isDefined(service.group(), service.application())) {
+            throw new AuthException(400, service.group() + ":" + service.application()
+                    + " is not a defined application. Define it first");
+        }
     }
 
     public List<ServiceRecord> list() {
@@ -55,6 +67,7 @@ public final class ServiceStore {
         if (service.managedByArchon()) {
             throw new AuthException(400, "Services of the Archon group are managed by Archon");
         }
+        requireDefinedOwner(service);
         return write(connection -> {
             if (find(connection, service.id()).isPresent()) {
                 throw new AuthException(409, "A service with the id " + service.id() + " exists");
@@ -78,6 +91,7 @@ public final class ServiceStore {
     public ServiceRecord update(String id, ServiceRecord requested) {
         ServiceRecord service = valid(new ServiceRecord(id, requested.name(), requested.portOffset(),
                 requested.group(), requested.application(), requested.mode(), false, null, null));
+        requireDefinedOwner(service);
         return write(connection -> {
             ServiceRecord current = find(connection, id)
                     .orElseThrow(() -> new AuthException(404, "No service with the id " + id));

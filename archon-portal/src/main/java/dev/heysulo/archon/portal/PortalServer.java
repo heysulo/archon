@@ -56,6 +56,7 @@ final class PortalServer implements ProcessFeed.Listener {
     private final AuthApi authApi;
     private final ConfigApi configApi;
     private final ServicesApi servicesApi;
+    private final ApplicationsApi applicationsApi;
     private final Function<String, Optional<Principal>> sessions;
     private final Set<Stream> streams = ConcurrentHashMap.newKeySet();
     // Writes to browsers block, so they never run on the thread that hears from the registry
@@ -70,7 +71,9 @@ final class PortalServer implements ProcessFeed.Listener {
      * @param sessions  finds who a session token belongs to
      */
     PortalServer(ProcessFeed feed, UnaryOperator<ProcessSnapshot> stamp, String assetRoot, AuthApi authApi,
-            ConfigApi configApi, ServicesApi servicesApi, Function<String, Optional<Principal>> sessions) {
+            ConfigApi configApi, ServicesApi servicesApi, ApplicationsApi applicationsApi,
+            Function<String, Optional<Principal>> sessions) {
+        this.applicationsApi = applicationsApi;
         this.configApi = configApi;
         this.servicesApi = servicesApi;
         this.feed = feed;
@@ -92,6 +95,7 @@ final class PortalServer implements ProcessFeed.Listener {
         server.createContext("/api/roles", authApi::handleRoles);
         server.createContext("/api/configs", configApi::handle);
         server.createContext("/api/services", servicesApi::handle);
+        server.createContext("/api/applications", applicationsApi::handle);
         server.createContext("/healthz", exchange -> Http.sendText(exchange, 200, "ok"));
         server.createContext("/", this::frontend);
         executor = Executors.newFixedThreadPool(THREADS);
