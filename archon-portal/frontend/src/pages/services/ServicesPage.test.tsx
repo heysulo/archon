@@ -37,7 +37,14 @@ function renderPage(options?: Parameters<typeof renderWith>[1]) {
 }
 
 describe("ServicesPage", () => {
-  beforeEach(() => mockPortal({ "GET /api/services": { body: SERVICES } }));
+  beforeEach(() => mockPortal({
+    "GET /api/services": { body: SERVICES },
+    "GET /api/applications": { body: [
+      { group: "Archon", name: "Config", description: "", builtIn: true },
+      { group: "Group", name: "Application", description: "", builtIn: false },
+      { group: "Shop", name: "Cart", description: "", builtIn: false },
+    ] },
+  }));
 
   it("lists services with the instances serving them", async () => {
     renderPage();
@@ -66,6 +73,16 @@ describe("ServicesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add service" }));
     // ping holds 0, archon-config 1 and reports 3
     expect(await screen.findByLabelText("Port offset")).toHaveValue("2");
+  });
+
+  it("picks the owner from the defined applications", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Add service" }));
+    fireEvent.click(await screen.findByPlaceholderText("Choose an application"));
+    // Rendered while closed too, so hidden ones count
+    expect(await screen.findByRole("option", { name: "Shop:Cart", hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Group:Application", hidden: true })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Archon:Config", hidden: true })).not.toBeInTheDocument();
   });
 
   it("offers no changes to users who can only view", async () => {

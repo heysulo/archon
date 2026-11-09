@@ -1,14 +1,16 @@
 import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, Stack, Table, Text,
   TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconAlertTriangle, IconDots, IconLock, IconPencil, IconPlus, IconSearch, IconTrash }
+import { IconAlertTriangle, IconDots, IconLock, IconPencil, IconPlugConnected, IconPlus, IconSearch, IconTrash }
   from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useProcessStream } from "../../api/processStream";
 import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
+import { announcements } from "../services/model";
 import { useServices } from "../services/servicesApi";
 import { ApplicationFormModal } from "./ApplicationFormModal";
+import { AssignServicesModal } from "./AssignServicesModal";
 import { useApplicationMutations, useApplications, type ApplicationDefinition, type ApplicationInput }
   from "./applicationsApi";
 import { key, matches, runningInstances, servicesByOwner, undefinedRunning } from "./model";
@@ -18,6 +20,8 @@ export function ApplicationsPage() {
   const manage = can(PERMISSIONS.applicationsManage);
   const seesProcesses = can(PERMISSIONS.processesView);
   const seesServices = can(PERMISSIONS.servicesView);
+  const assigns = can(PERMISSIONS.servicesManage);
+  const actions = manage || assigns;
   const definitions = useApplications();
   const services = useServices(seesServices);
   const { snapshot } = useProcessStream();
@@ -26,10 +30,12 @@ export function ApplicationsPage() {
   // undefined: closed; null: adding; a definition: editing it
   const [editing, setEditing] = useState<ApplicationDefinition | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<ApplicationDefinition | null>(null);
+  const [assigning, setAssigning] = useState<ApplicationDefinition | null>(null);
 
   const all = useMemo(() => definitions.data ?? [], [definitions.data]);
   const running = useMemo(() => runningInstances(snapshot?.processes ?? []), [snapshot]);
   const owned = useMemo(() => servicesByOwner(services.data ?? []), [services.data]);
+  const announced = useMemo(() => announcements(snapshot?.processes ?? []), [snapshot]);
   const strays = useMemo(() => undefinedRunning(running, all), [running, all]);
   const shown = useMemo(() => all.filter((definition) => matches(definition, query)), [all, query]);
 
@@ -117,7 +123,7 @@ export function ApplicationsPage() {
                   <Table.Th>Application</Table.Th>
                   {seesProcesses && <Table.Th>Running</Table.Th>}
                   {seesServices && <Table.Th>Services</Table.Th>}
-                  {manage && <Table.Th />}
+                  {actions && <Table.Th />}
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -172,7 +178,7 @@ export function ApplicationsPage() {
                           )}
                         </Table.Td>
                       )}
-                      {manage && (
+                      {actions && (
                         <Table.Td>
                           {!definition.builtIn && (
                             <Menu position="bottom-end">
@@ -182,14 +188,24 @@ export function ApplicationsPage() {
                                 </ActionIcon>
                               </Menu.Target>
                               <Menu.Dropdown>
-                                <Menu.Item leftSection={<IconPencil size={16} />}
-                                           onClick={() => setEditing(definition)}>
-                                  Edit
-                                </Menu.Item>
-                                <Menu.Item color="red" leftSection={<IconTrash size={16} />} disabled={why !== null}
-                                           onClick={() => setDeleting(definition)}>
-                                  {why ? `Remove (${why.toLowerCase()})` : "Remove"}
-                                </Menu.Item>
+                                {assigns && (
+                                  <Menu.Item leftSection={<IconPlugConnected size={16} />}
+                                             onClick={() => setAssigning(definition)}>
+                                    Assign services
+                                  </Menu.Item>
+                                )}
+                                {manage && (
+                                  <>
+                                    <Menu.Item leftSection={<IconPencil size={16} />}
+                                               onClick={() => setEditing(definition)}>
+                                      Edit
+                                    </Menu.Item>
+                                    <Menu.Item color="red" leftSection={<IconTrash size={16} />}
+                                               disabled={why !== null} onClick={() => setDeleting(definition)}>
+                                      {why ? `Remove (${why.toLowerCase()})` : "Remove"}
+                                    </Menu.Item>
+                                  </>
+                                )}
                               </Menu.Dropdown>
                             </Menu>
                           )}
@@ -204,6 +220,9 @@ export function ApplicationsPage() {
         </Card>
       )}
 
+      <AssignServicesModal target={assigning} services={services.data ?? []} announced={announced}
+                           onClose={() => setAssigning(null)}
+                           onAssigned={(ids) => notifications.show({ color: "green", message: `Assigned ${ids.join(", ")}` })} />
       <ApplicationFormModal opened={editing !== undefined} definition={editing ?? null}
                             onClose={() => setEditing(undefined)} onSubmit={save} />
       <Modal opened={deleting !== null} onClose={() => setDeleting(null)}

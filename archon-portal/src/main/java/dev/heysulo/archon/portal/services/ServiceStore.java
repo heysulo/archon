@@ -114,6 +114,34 @@ public final class ServiceStore {
         });
     }
 
+    /**
+     * Makes the given application the service's only owner, leaving the rest of the definition as it is. A service
+     * has one owner, so this takes it from whichever application owned it before.
+     */
+    public ServiceRecord assign(String id, String group, String application) {
+        ServiceRecord owner = valid(new ServiceRecord(id, "owner", 0, group, application, "LOAD_BALANCE", false,
+                null, null));
+        if (owner.managedByArchon()) {
+            throw new AuthException(400, "Services of the Archon group are managed by Archon");
+        }
+        requireDefinedOwner(owner);
+        return write(connection -> {
+            ServiceRecord current = find(connection, id)
+                    .orElseThrow(() -> new AuthException(404, "No service with the id " + id));
+            if (current.managedByArchon()) {
+                throw new AuthException(400, "Services of the Archon group are managed by Archon");
+            }
+            try (PreparedStatement update = connection.prepareStatement("UPDATE services SET app_group = ?, "
+                    + "app_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")) {
+                update.setString(1, owner.group());
+                update.setString(2, owner.application());
+                update.setString(3, id);
+                update.executeUpdate();
+            }
+            return find(connection, id).orElseThrow();
+        });
+    }
+
     public void delete(String id) {
         write(connection -> {
             ServiceRecord current = find(connection, id)

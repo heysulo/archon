@@ -9,6 +9,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
 import { announcements, instancesByService, matches, MODE_LABELS, takenOffsets, undefinedServices,
   type ServiceInstance } from "./model";
+import { useApplications } from "../applications/applicationsApi";
 import { ServiceFormModal } from "./ServiceFormModal";
 import { useServiceMutations, useServices, type Service, type ServiceInput } from "./servicesApi";
 
@@ -40,6 +41,8 @@ export function ServicesPage() {
   const manage = can(PERMISSIONS.servicesManage);
   const seesProcesses = can(PERMISSIONS.processesView);
   const services = useServices();
+  const seesApplications = can(PERMISSIONS.applicationsView);
+  const definitions = useApplications(manage && seesApplications);
   const { snapshot } = useProcessStream();
   const { create, update, remove } = useServiceMutations();
   const [query, setQuery] = useState("");
@@ -206,6 +209,7 @@ export function ServicesPage() {
       )}
 
       <ServiceFormModal opened={editing !== undefined} service={editing ?? null} taken={taken}
+                        definitions={seesApplications ? definitions.data ?? [] : null}
                         onClose={() => setEditing(undefined)} onSubmit={save} />
       <Modal opened={deleting !== null} onClose={() => setDeleting(null)} title={`Delete ${deleting?.id ?? ""}?`}>
         <Stack>

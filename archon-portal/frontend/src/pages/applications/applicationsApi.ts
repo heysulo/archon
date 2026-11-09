@@ -16,8 +16,10 @@ export type ApplicationInput = Pick<ApplicationDefinition, "group" | "name" | "d
 
 const APPLICATIONS = ["applications"] as const;
 
-export function useApplications() {
-  return useQuery({ queryKey: APPLICATIONS, queryFn: () => api<ApplicationDefinition[]>("/api/applications") });
+/** @param enabled false skips the request, for those who may not see definitions */
+export function useApplications(enabled = true) {
+  return useQuery({ queryKey: APPLICATIONS, queryFn: () => api<ApplicationDefinition[]>("/api/applications"),
+    enabled });
 }
 
 const path = (group: string, name: string) =>

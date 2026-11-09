@@ -1,5 +1,5 @@
 import type { ProcessInfo } from "../../api/types";
-import { announcements, firstFreeOffset, instancesByService, matches, offsetError, parseServed, takenOffsets,
+import { announcements, firstFreeOffset, ownerChoices, splitOwner, instancesByService, matches, offsetError, parseServed, takenOffsets,
   undefinedServices } from "./model";
 import type { Service, ServiceMode } from "./servicesApi";
 
@@ -70,5 +70,17 @@ describe("services model", () => {
     expect(matches(PING, "application")).toBe(true);
     expect(matches(PING, "mirror")).toBe(true);
     expect(matches(PING, "balanced")).toBe(false);
+  });
+
+  it("offers defined applications outside Archon as owners, keeping an undefined current one", () => {
+    const definitions = [
+      { group: "Archon", name: "Config", builtIn: true },
+      { group: "Shop", name: "Cart", builtIn: false },
+      { group: "Group", name: "Application", builtIn: false },
+    ];
+    expect(ownerChoices(definitions).map((choice) => choice.value)).toEqual(["Group:Application", "Shop:Cart"]);
+    expect(ownerChoices(definitions, { group: "Old", application: "Thing" })).toContainEqual(
+      { value: "Old:Thing", label: "Old:Thing (not defined)" });
+    expect(splitOwner("Shop:Cart")).toEqual({ group: "Shop", application: "Cart" });
   });
 });

@@ -24,6 +24,8 @@ import java.util.function.Function;
  *     <li>{@code GET /api/services} every service ({@code services:view})</li>
  *     <li>{@code POST /api/services}, {@code PUT /api/services/{id}}, {@code DELETE /api/services/{id}}
  *     ({@code services:manage})</li>
+ *     <li>{@code PUT /api/services/{id}/owner} with a group and application, to give the service to that application
+ *     alone, leaving the rest of its definition as it is ({@code services:manage})</li>
  * </ul>
  * Running instances are not here: the process stream already lists what each instance serves. A service that any
  * instance is serving cannot be changed or deleted: its instances would keep the old port or owner, and clients
@@ -32,6 +34,7 @@ import java.util.function.Function;
 final class ServicesApi {
     private static final Logger LOGGER = LoggerFactory.getLogger(ServicesApi.class);
     private static final String PREFIX = "/api/services/";
+    private static final String OWNER_SUFFIX = "/owner";
 
     private final ServiceStore store;
     private final ProcessFeed feed;
@@ -42,6 +45,12 @@ final class ServicesApi {
         this.store = store;
         this.feed = feed;
         this.sessions = sessions;
+    }
+
+    // Filled by Gson
+    static final class OwnerBody {
+        String group;
+        String application;
     }
 
     // Filled by Gson
@@ -112,13 +121,29 @@ final class ServicesApi {
                 }
                 return;
             }
-            if (!path.startsWith(PREFIX) || path.indexOf('/', PREFIX.length()) >= 0) {
+            boolean owner = path.endsWith(OWNER_SUFFIX);
+            String rawId = !path.startsWith(PREFIX) ? "" : path.substring(PREFIX.length(),
+                    owner ? path.length() - OWNER_SUFFIX.length() : path.length());
+            if (rawId.isEmpty() || rawId.indexOf('/') >= 0) {
                 Http.sendError(exchange, 404, "Not found");
                 return;
             }
-            String id = URLDecoder.decode(path.substring(PREFIX.length()), StandardCharsets.UTF_8);
+            String id = URLDecoder.decode(rawId, StandardCharsets.UTF_8);
             Http.requireSameOrigin(exchange);
             AuthService.require(user, Permission.SERVICES_MANAGE);
+            if (owner) {
+                if (!method.equals("PUT")) {
+                    Http.sendError(exchange, 405, "Method not allowed");
+                    return;
+                }
+                requireStopped(id);
+                OwnerBody body = Http.readJson(exchange, OwnerBody.class);
+                ServiceRecord assigned = store.assign(id, body.group, body.application);
+                LOGGER.info("{} gave service {} to {}:{}", user.username(), id, assigned.group(),
+                        assigned.application());
+                Http.sendJson(exchange, 200, assigned);
+                return;
+            }
             if (method.equals("PUT") || method.equals("DELETE")) {
                 requireStopped(id);
             }

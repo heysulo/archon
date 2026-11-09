@@ -383,6 +383,39 @@ public class PortalServerTest {
         Assert.assertTrue(refused.body().contains("not a defined application"), refused.body());
     }
 
+    @Test
+    public void givesAServiceToOneApplication() throws Exception {
+        Assert.assertEquals(post("/api/services", "{\"id\":\"search\",\"name\":\"Search\",\"portOffset\":12,"
+                + "\"group\":\"Shop\",\"application\":\"Search\",\"mode\":\"LOAD_BALANCE\"}", adminCookie,
+                true).statusCode(), 201);
+
+        HttpResponse<String> moved = send("PUT", "/api/services/search/owner",
+                "{\"group\":\"Library\",\"application\":\"Catalogue\"}", adminCookie);
+        Assert.assertEquals(moved.statusCode(), 200, moved.body());
+        Assert.assertTrue(moved.body().contains("\"group\":\"Library\",\"application\":\"Catalogue\""),
+                moved.body());
+        Assert.assertTrue(moved.body().contains("\"portOffset\":12"), "the rest is kept: " + moved.body());
+        // The one owner it had is gone, so its definition can now be removed
+        Assert.assertEquals(send("DELETE", "/api/applications/Shop/Search", null, adminCookie).statusCode(), 204);
+    }
+
+    @Test
+    public void refusesGivingAServiceAwayWrongly() throws Exception {
+        Assert.assertEquals(send("PUT", "/api/services/ping/owner",
+                "{\"group\":\"Shop\",\"application\":\"Search\"}", adminCookie).statusCode(), 409, "running");
+        Assert.assertEquals(post("/api/services", "{\"id\":\"search\",\"name\":\"Search\",\"portOffset\":12,"
+                + "\"group\":\"Shop\",\"application\":\"Search\",\"mode\":\"LOAD_BALANCE\"}", adminCookie,
+                true).statusCode(), 201);
+        HttpResponse<String> undefined = send("PUT", "/api/services/search/owner",
+                "{\"group\":\"Nowhere\",\"application\":\"Nobody\"}", adminCookie);
+        Assert.assertEquals(undefined.statusCode(), 400, undefined.body());
+        Assert.assertEquals(send("PUT", "/api/services/search/owner",
+                "{\"group\":\"Archon\",\"application\":\"Config\"}", adminCookie).statusCode(), 400, "Archon");
+        Assert.assertEquals(send("PUT", "/api/services/missing/owner",
+                "{\"group\":\"Shop\",\"application\":\"Search\"}", adminCookie).statusCode(), 404);
+        Assert.assertEquals(send("GET", "/api/services/search/owner", null, adminCookie).statusCode(), 405);
+    }
+
     // ---------------- application definitions ----------------
 
     @Test

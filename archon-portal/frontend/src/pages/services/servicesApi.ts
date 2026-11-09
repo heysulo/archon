@@ -40,6 +40,12 @@ export function useServiceMutations() {
         api<Service>(`/api/services/${encodeURIComponent(service.id)}`, { method: "PUT", body: service }),
       onSuccess: refresh,
     }),
+    /** Gives a service to one application, its only owner from then on, leaving the rest of it as it is. */
+    assign: useMutation({
+      mutationFn: ({ id, group, application }: { id: string; group: string; application: string }) =>
+        api<Service>(`/api/services/${encodeURIComponent(id)}/owner`, { method: "PUT", body: { group, application } }),
+      onSuccess: refresh,
+    }),
     remove: useMutation({
       mutationFn: (id: string) => api<void>(`/api/services/${encodeURIComponent(id)}`, { method: "DELETE" }),
       onSuccess: refresh,

@@ -93,6 +93,29 @@ export function identifierError(value: string): string | null {
   return IDENTIFIER.test(value.trim()) ? null : "Letters, digits, dots, dashes or underscores";
 }
 
+/**
+ * The applications a service may be given to, as `Group:Name`: every defined application outside Archon's own
+ * group. The current owner is kept even if no longer defined, so editing still shows it.
+ */
+export function ownerChoices(definitions: { group: string; name: string; builtIn: boolean }[],
+  current?: { group: string; application: string }): { value: string; label: string }[] {
+  const choices = definitions.filter((definition) => !definition.builtIn && definition.group !== "Archon")
+    .map((definition) => `${definition.group}:${definition.name}`);
+  const owner = current && current.group ? `${current.group}:${current.application}` : null;
+  const values = owner && !choices.includes(owner) ? [...choices, owner] : choices;
+  return [...values].sort().map((value) => ({
+    value,
+    label: value === owner && !choices.includes(owner) ? `${value} (not defined)` : value,
+  }));
+}
+
+/** Splits `Group:Name`; identifiers hold no colon. */
+export function splitOwner(value: string): { group: string; application: string } {
+  const colon = value.indexOf(":");
+  return colon < 0 ? { group: "", application: "" }
+    : { group: value.slice(0, colon), application: value.slice(colon + 1) };
+}
+
 export const MAX_PORT_OFFSET = 65534;
 
 /** Which service holds each port offset. Offsets are unique across every service. */
