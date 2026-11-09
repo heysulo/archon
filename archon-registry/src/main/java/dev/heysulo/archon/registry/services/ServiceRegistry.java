@@ -107,6 +107,18 @@ public final class ServiceRegistry {
                 .toList();
     }
 
+    /** The ids of the services an application instance serves with TLS, ordered by id. */
+    public List<String> secureServicesOf(Application application) {
+        return running.entrySet().stream()
+                .filter(entry -> {
+                    Address address = entry.getValue().get(application);
+                    return address != null && address.secure();
+                })
+                .map(Map.Entry::getKey)
+                .sorted()
+                .toList();
+    }
+
     /** Forgets every service an application instance was running, as when it disconnects. */
     public void forget(Application application) {
         running.values().forEach(instances -> instances.remove(application));

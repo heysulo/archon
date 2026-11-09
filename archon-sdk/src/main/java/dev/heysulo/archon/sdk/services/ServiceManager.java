@@ -192,7 +192,7 @@ public final class ServiceManager {
     public void announceAll() {
         running.forEach((serviceId, service) ->
                 registry.accept(new ServiceStartedMessage(PendingRequests.UNTRACKED, serviceId, advertisedHost.get(),
-                        service.port())));
+                        service.port()).secure(service.server() instanceof SecureServer)));
     }
 
     /**

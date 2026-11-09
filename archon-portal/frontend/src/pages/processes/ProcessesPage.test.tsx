@@ -22,7 +22,7 @@ describe("ProcessesPage", () => {
 
     expect(screen.getByText("hello-world-java-4vsbc")).toBeInTheDocument();
     expect(screen.getByText("192.168.192.78")).toBeInTheDocument();
-    expect(screen.getByText("ping:9001")).toBeInTheDocument();
+    expect(screen.getAllByText("ping:9001")).toHaveLength(2);
     expect(screen.getByText("archon-registry-1")).toBeInTheDocument();
     expect(screen.queryByText("hello-world-java-dead1")).not.toBeInTheDocument();
   });
@@ -50,6 +50,12 @@ describe("ProcessesPage", () => {
     expect(firstHost()).toContain("archon-registry-0");
     fireEvent.click(screen.getByLabelText("Sort by host"));
     expect(firstHost()).toContain("hello-world-java-94fdt");
+  });
+
+  it("shows services served with TLS apart from those in the clear", () => {
+    renderPage({ snapshot, status: "live", error: null });
+    expect(screen.getByLabelText("ping:9001, TLS")).toBeInTheDocument();
+    expect(screen.getByLabelText("ping:9001, not encrypted")).toBeInTheDocument();
   });
 
   it("warns when the registry is unavailable but keeps the last state", () => {

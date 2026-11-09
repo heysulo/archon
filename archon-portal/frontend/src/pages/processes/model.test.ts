@@ -1,5 +1,5 @@
 import { process, snapshot } from "../../test/fixtures";
-import { DEFAULT_SORT, filterProcesses, matches, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
+import { DEFAULT_SORT, filterProcesses, isSecure, matches, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
   type ProcessFilters } from "./model";
 
 describe("roleOf", () => {
@@ -94,6 +94,15 @@ describe("summarize", () => {
   });
 
   it("counts running instances, their applications and services", () => {
-    expect(summarize(snapshot.processes)).toEqual({ running: 4, applications: 2, services: 1 });
+    expect(summarize(snapshot.processes)).toEqual({ running: 4, applications: 2, services: 2 });
+  });
+});
+
+describe("isSecure", () => {
+  it("reads which services a process serves with TLS", () => {
+    const [leader, standby] = snapshot.processes;
+    expect(isSecure(leader!, "ping@192.168.192.78:9001")).toBe(true);
+    expect(isSecure(standby!, "ping@192.168.192.86:9001")).toBe(false);
+    expect(isSecure({ ...leader!, secureServices: undefined }, "ping@192.168.192.78:9001")).toBe(false);
   });
 });

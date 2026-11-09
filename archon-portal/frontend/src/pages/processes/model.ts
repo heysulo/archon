@@ -133,6 +133,12 @@ export function summarize(processes: ProcessInfo[]): Summary {
   };
 }
 
+/** Whether a process serves a service, given as `id@host:port`, with TLS. */
+export function isSecure(process: ProcessInfo, service: string): boolean {
+  const served = parseServed(service);
+  return Boolean(served && process.secureServices?.includes(served.id));
+}
+
 /**
  * A service as the process row shows it: `ping:9001`, since the row already shows the instance's address. One served
  * on another address keeps it, `ping@10.0.0.9:9001`, so that is not lost.

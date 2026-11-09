@@ -135,6 +135,19 @@ public class ServiceRegistryTest {
         Assert.assertEquals(endpoints("orders").get(0).host(), "192.168.0.9");
     }
 
+    @Test
+    public void tellsWhichServicesAreServedWithTls() {
+        Application orders = running("OrderApp", 1);
+        registry.start(orders, new ServiceStartedMessage(7, "orders", "192.168.0.9", 9001).secure(true));
+        Application search = running("SearchApp", 1);
+        registry.start(search, new ServiceStartedMessage(8, "search", "192.168.0.8", 9002));
+
+        Assert.assertEquals(registry.secureServicesOf(orders), List.of("orders"));
+        Assert.assertEquals(registry.secureServicesOf(search), List.of(), "an instance from before TLS");
+        Assert.assertTrue(endpoints("orders").get(0).secure());
+        Assert.assertFalse(endpoints("search").get(0).secure());
+    }
+
     private List<ServiceEndpoint> endpoints(String serviceId) {
         return registry.lookup(new ServiceLookupMessage(1, serviceId)).getEndpoints();
     }

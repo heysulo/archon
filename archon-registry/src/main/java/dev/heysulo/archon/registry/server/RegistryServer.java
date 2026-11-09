@@ -409,7 +409,8 @@ public class RegistryServer implements ServerCallback {
                 // This registry's own record has no connection to itself, but it is plainly present
                 .map(app -> new ProcessInfo(app.getGroup(), app.getName(), app.getRank(),
                         String.valueOf(app.getRunLevel()), app.isRunning(),
-                        app == applicationRegistry || app.isConnected(), services.servicesOf(app), app.getDetails()))
+                        app == applicationRegistry || app.isConnected(), services.servicesOf(app), app.getDetails(),
+                        services.secureServicesOf(app)))
                 .sorted(java.util.Comparator.comparing(ProcessInfo::group)
                         .thenComparing(ProcessInfo::name)
                         .thenComparingInt(ProcessInfo::rank))

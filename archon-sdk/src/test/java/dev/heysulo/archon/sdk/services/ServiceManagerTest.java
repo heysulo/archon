@@ -195,6 +195,20 @@ public class ServiceManagerTest {
         Assert.assertEquals(announced.getPort(), 9001);
     }
 
+    // The portal shows whether each service is encrypted, so a new primary must hear it as the first one did
+    @Test
+    public void announcesAgainWhetherEachServiceUsesTls() {
+        manager = new ServiceManager("Shop", "OrderApp", registry, definition -> 9001,
+                (port, callback) -> new FakeSecureServer(port, callback), () -> null, () -> onRegistryThread);
+        manager.start("orders", NO_OP, server -> { });
+        Assert.assertTrue(last(ServiceStartedMessage.class).isSecure());
+        sent.clear();
+
+        manager.announceAll();
+
+        Assert.assertTrue(last(ServiceStartedMessage.class).isSecure());
+    }
+
     @Test
     public void aServiceRefusedAfterReconnectingIsStopped() {
         manager.start("orders", NO_OP, server -> { });
@@ -215,6 +229,20 @@ public class ServiceManagerTest {
 
     private <T extends Message> T last(Class<T> type) {
         return sent.stream().filter(type::isInstance).map(type::cast).reduce((a, b) -> b).orElseThrow();
+    }
+
+    private static final class FakeSecureServer extends dev.heysulo.databridge.core.server.secure.SecureServer {
+        FakeSecureServer(int port, ServerCallback callback) {
+            super(port, callback, () -> null, false, null, null);
+        }
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void stop() {
+        }
     }
 
     private static final class FakeServer extends Server {

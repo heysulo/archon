@@ -23,6 +23,8 @@ export interface ProcessInfo {
   connected: boolean;
   /** Services it serves, as `id@host:port`. */
   services: string[];
+  /** Ids of the services it serves with TLS; absent from registries that predate TLS. */
+  secureServices?: string[];
   details?: InstanceDetails;
 }
 

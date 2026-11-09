@@ -1,11 +1,11 @@
 import { Alert, Badge, Box, Button, Card, Center, Code, Group, Loader, MultiSelect, Paper, Select, SimpleGrid, Stack,
-  Switch, Table, Text, TextInput, Title, UnstyledButton } from "@mantine/core";
+  Switch, Table, Text, TextInput, Title, Tooltip, UnstyledButton } from "@mantine/core";
 import { useLocalStorage } from "@mantine/hooks";
 import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconSearch, IconSelector } from "@tabler/icons-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useProcessStream } from "../../api/processStream";
 import type { ProcessInfo } from "../../api/types";
-import { applicationOf, DEFAULT_SORT, filterProcesses, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
+import { applicationOf, DEFAULT_SORT, filterProcesses, isSecure, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
   type LinkFilter, type Sort, type SortColumn } from "./model";
 
 function Stat({ label, value }: { label: string; value: number | string }) {
@@ -100,11 +100,18 @@ function Row({ process, showNode }: { process: ProcessInfo; showNode: boolean })
       <Table.Td>
         {process.services.length ? (
           <Group gap={4} wrap="nowrap">
-            {process.services.map((service) => (
-              <Code key={service} title={service}>
-                {serviceLabel(service, process.details?.address)}
-              </Code>
-            ))}
+            {process.services.map((service) => {
+              const secure = isSecure(process, service);
+              return (
+                <Tooltip key={service} label={`${service} · ${secure ? "TLS" : "Not encrypted"}`}>
+                  <Code color={secure ? "green.1" : "red.1"} c={secure ? "green.9" : "red.9"}
+                        aria-label={`${serviceLabel(service, process.details?.address)}, ${secure ? "TLS"
+                          : "not encrypted"}`}>
+                    {serviceLabel(service, process.details?.address)}
+                  </Code>
+                </Tooltip>
+              );
+            })}
           </Group>
         ) : (
           <Text size="sm" c="dimmed">

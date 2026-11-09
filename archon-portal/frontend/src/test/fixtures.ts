@@ -22,9 +22,11 @@ export const snapshot: ProcessSnapshot = {
     process({
       rank: 1,
       services: ["ping@192.168.192.78:9001"],
+      secureServices: ["ping"],
       details: { host: "hello-world-java-4vsbc", address: "192.168.192.78", node: "kubernetes" },
     }),
-    process({ rank: 2, details: { host: "hello-world-java-94fdt", address: "192.168.192.86", node: "kubernetes" } }),
+    process({ rank: 2, services: ["ping@192.168.192.86:9001"], secureServices: [],
+      details: { host: "hello-world-java-94fdt", address: "192.168.192.86", node: "kubernetes" } }),
     process({ rank: 3, runLevel: "KILLED", running: false, connected: false, details: { host: "hello-world-java-dead1" } }),
     process({ group: "Archon", name: "Registry", rank: 1, details: { host: "archon-registry-1", address: "10.21.3.202" } }),
     process({ group: "Archon", name: "Registry", rank: 2, details: { host: "archon-registry-0", address: "10.21.3.201" } }),
