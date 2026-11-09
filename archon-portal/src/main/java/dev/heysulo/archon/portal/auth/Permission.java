@@ -9,7 +9,10 @@ import java.util.Optional;
  */
 public enum Permission {
     PROCESSES_VIEW("processes:view", "See running processes"),
-    USERS_MANAGE("users:manage", "Create, change and delete users and assign roles"),
+    USERS_VIEW("users:view", "See users and the roles they hold"),
+    USERS_MANAGE("users:manage", "Create, change and delete users and assign them roles"),
+    ROLES_VIEW("roles:view", "See roles and their permissions"),
+    ROLES_MANAGE("roles:manage", "Create, change and delete roles"),
     CONFIGS_VIEW("configs:view", "See configurations"),
     CONFIGS_MANAGE("configs:manage", "Create, change and delete configurations"),
     SERVICES_VIEW("services:view", "See service definitions"),
@@ -32,6 +35,17 @@ public enum Permission {
 
     public String description() {
         return description;
+    }
+
+    /**
+     * The permission that includes this one: modifying something includes seeing it, so {@code configs:manage}
+     * includes {@code configs:view}.
+     *
+     * @return the {@code manage} permission of the same feature, for a {@code view} permission that has one
+     */
+    public Optional<Permission> includedIn() {
+        return key.endsWith(":view") ? byKey(key.substring(0, key.length() - ":view".length()) + ":manage")
+                : Optional.empty();
     }
 
     public static Optional<Permission> byKey(String key) {

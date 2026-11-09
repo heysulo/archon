@@ -15,7 +15,9 @@ public record Principal(long userId, String username, String displayName, Set<St
         permissions = Set.copyOf(permissions);
     }
 
+    /** Whether the user holds the permission, directly or through the one including it, or holds every one. */
     public boolean can(Permission permission) {
-        return permissions.contains(Permission.ALL) || permissions.contains(permission.key());
+        return permissions.contains(Permission.ALL) || permissions.contains(permission.key())
+                || permission.includedIn().map(including -> permissions.contains(including.key())).orElse(false);
     }
 }

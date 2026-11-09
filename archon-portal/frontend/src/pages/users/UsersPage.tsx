@@ -4,6 +4,7 @@ import { notifications } from "@mantine/notifications";
 import { IconDots, IconKey, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
+import { PERMISSIONS } from "../../auth/permissions";
 import { ResetPasswordModal } from "./ResetPasswordModal";
 import { UserFormModal, type UserFormValues } from "./UserFormModal";
 import { useRoles, useUserMutations, useUsers, type User } from "./usersApi";
@@ -13,9 +14,11 @@ function when(timestamp: string | undefined): string {
 }
 
 export function UsersPage() {
-  const { user: me } = useAuth();
+  const { user: me, can } = useAuth();
+  const manage = can(PERMISSIONS.usersManage);
   const users = useUsers();
-  const roles = useRoles();
+  // Only for assigning roles, so only fetched by those who can
+  const roles = useRoles(manage);
   const { create, update, resetPassword, remove } = useUserMutations();
   // undefined: closed; null: adding a user; a user: editing them
   const [editing, setEditing] = useState<User | null | undefined>(undefined);
@@ -60,9 +63,11 @@ export function UsersPage() {
             Who can sign in to the portal, and with which roles
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
-          Add user
+        {manage && (
+          <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
+            Add user
         </Button>
+        )}
       </Group>
 
       {users.isError && (
@@ -129,29 +134,31 @@ export function UsersPage() {
                         <Text size="sm">{when(user.createdAt)}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Menu position="bottom-end">
-                          <Menu.Target>
-                            <ActionIcon variant="subtle" color="gray" aria-label={`Actions for ${user.username}`}>
-                              <IconDots size={16} />
-                            </ActionIcon>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            <Menu.Item leftSection={<IconPencil size={16} />} onClick={() => setEditing(user)}>
-                              Edit
-                            </Menu.Item>
-                            <Menu.Item leftSection={<IconKey size={16} />} onClick={() => setResetting(user)}>
-                              Reset password
-                            </Menu.Item>
-                            <Menu.Item
-                              color="red"
-                              leftSection={<IconTrash size={16} />}
-                              disabled={isSelf}
-                              onClick={() => setDeleting(user)}
-                            >
-                              Delete
-                            </Menu.Item>
-                          </Menu.Dropdown>
-                        </Menu>
+                        {manage && (
+                          <Menu position="bottom-end">
+                            <Menu.Target>
+                              <ActionIcon variant="subtle" color="gray" aria-label={`Actions for ${user.username}`}>
+                                <IconDots size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Item leftSection={<IconPencil size={16} />} onClick={() => setEditing(user)}>
+                                Edit
+                              </Menu.Item>
+                              <Menu.Item leftSection={<IconKey size={16} />} onClick={() => setResetting(user)}>
+                                Reset password
+                              </Menu.Item>
+                              <Menu.Item
+                                color="red"
+                                leftSection={<IconTrash size={16} />}
+                                disabled={isSelf}
+                                onClick={() => setDeleting(user)}
+                              >
+                                Delete
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        )}
                       </Table.Td>
                     </Table.Tr>
                   );

@@ -198,6 +198,152 @@ public class AuthServiceTest {
         Assert.assertEquals(status(() -> auth.listUsers(viewer)), 403);
     }
 
+    // ---------------- managing roles ----------------
+
+    @Test
+    public void managesRolesAndAppliesChangesAtOnce() {
+        Principal admin = firstAdmin().principal();
+        AuthService.RoleView operator = auth.createRole(admin, " operator ", "Runs the system",
+                List.of(Permission.PROCESSES_VIEW.key()));
+        Assert.assertEquals(operator.id(), "operator");
+        Assert.assertFalse(operator.builtIn());
+        auth.createUser(admin, "olga", null, "olgas long password", List.of("operator"));
+        AuthService.Session olga = auth.login("olga", "olgas long password");
+        Assert.assertFalse(olga.principal().can(Permission.CONFIGS_VIEW));
+
+        AuthService.RoleView changed = auth.updateRole(admin, "operator", "Runs and tunes the system",
+                List.of(Permission.PROCESSES_VIEW.key(), Permission.CONFIGS_VIEW.key()));
+        Assert.assertEquals(changed.users(), List.of("olga"));
+        Assert.assertTrue(auth.authenticate(olga.token()).orElseThrow().can(Permission.CONFIGS_VIEW),
+                "a signed-in user gets the new permission on the next request");
+    }
+
+    @Test
+    public void validatesRoles() {
+        Principal admin = firstAdmin().principal();
+        Assert.assertEquals(status(() -> auth.createRole(admin, "Has Space", "", List.of("processes:view"))), 400);
+        Assert.assertEquals(status(() -> auth.createRole(admin, "empty", "", List.of())), 400);
+        Assert.assertEquals(status(() -> auth.createRole(admin, "wild", "", List.of("*"))), 400,
+                "only the admin role holds every permission");
+        Assert.assertEquals(status(() -> auth.createRole(admin, "typo", "", List.of("procesess:view"))), 400);
+        Assert.assertEquals(status(() -> auth.createRole(admin, "admin", "", List.of("processes:view"))), 409);
+        Assert.assertEquals(status(() -> auth.createRole(admin, "long", "x".repeat(300),
+                List.of("processes:view"))), 400);
+        Assert.assertEquals(status(() -> auth.updateRole(admin, "missing", "", List.of("processes:view"))), 404);
+    }
+
+    @Test
+    public void theAdminRoleIsBuiltIn() {
+        Principal admin = firstAdmin().principal();
+        Assert.assertTrue(auth.listRoles(admin).stream().filter(role -> role.id().equals("admin")).findFirst()
+                .orElseThrow().builtIn());
+        Assert.assertEquals(status(() -> auth.updateRole(admin, "admin", "", List.of("processes:view"))), 400);
+        Assert.assertEquals(status(() -> auth.deleteRole(admin, "admin")), 400);
+    }
+
+    @Test
+    public void deletesOnlyRolesNobodyHolds() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "viewer", "", List.of(Permission.PROCESSES_VIEW.key()));
+        AuthService.UserView vic = auth.createUser(admin, "vic", null, "vics long password", List.of("viewer"));
+        AuthException refused = Assert.expectThrows(AuthException.class, () -> auth.deleteRole(admin, "viewer"));
+        Assert.assertEquals(refused.status(), 409);
+        Assert.assertTrue(refused.getMessage().contains("vic"), refused.getMessage());
+
+        auth.deleteUser(admin, vic.id());
+        auth.deleteRole(admin, "viewer");
+        Assert.assertTrue(auth.listRoles(admin).stream().noneMatch(role -> role.id().equals("viewer")));
+    }
+
+    // Managing roles or users must never let anyone gain permissions they lack
+    @Test
+    public void nobodyGrantsWhatTheyDoNotHold() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "role-admin", "",
+                List.of(Permission.ROLES_MANAGE.key(), Permission.USERS_MANAGE.key(), Permission.PROCESSES_VIEW.key()));
+        auth.createRole(admin, "configurer", "", List.of(Permission.CONFIGS_MANAGE.key()));
+        auth.createUser(admin, "rita", null, "ritas long password", List.of("role-admin"));
+        Principal rita = auth.login("rita", "ritas long password").principal();
+
+        Assert.assertEquals(status(() -> auth.createRole(rita, "sneaky", "",
+                List.of(Permission.CONFIGS_MANAGE.key()))), 403, "a role with a permission she lacks");
+        auth.createRole(rita, "watcher", "", List.of(Permission.PROCESSES_VIEW.key()));
+        Assert.assertEquals(status(() -> auth.createUser(rita, "sam", null, "sams long password",
+                List.of("configurer"))), 403, "a role with a permission she lacks");
+        Assert.assertEquals(status(() -> auth.createUser(rita, "sam", null, "sams long password",
+                List.of("admin"))), 403, "the admin role");
+        auth.createUser(rita, "sam", null, "sams long password", List.of("watcher"));
+    }
+
+    // Editing a user may keep a role the editor could not give
+    @Test
+    public void keepingARoleIsNotGivingIt() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "user-admin", "", List.of(Permission.USERS_MANAGE.key()));
+        auth.createRole(admin, "configurer", "", List.of(Permission.CONFIGS_MANAGE.key()));
+        AuthService.UserView carl = auth.createUser(admin, "carl", null, "carls long password",
+                List.of("configurer"));
+        auth.createUser(admin, "uma", null, "umas long password", List.of("user-admin"));
+        Principal uma = auth.login("uma", "umas long password").principal();
+
+        auth.updateUser(uma, carl.id(), "Carl", true, List.of("configurer"));
+    }
+
+    @Test
+    public void neverLeavesNobodyToManageUsersOrRoles() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "keeper", "", List.of(Permission.USERS_MANAGE.key(), Permission.ROLES_MANAGE.key()));
+        auth.createUser(admin, "kim", null, "kims long password", List.of("keeper"));
+        Principal kim = auth.login("kim", "kims long password").principal();
+        // alice, the only admin, is disabled by kim: kim's role is now all that manages users and roles
+        auth.updateUser(kim, admin.userId(), "Alice", false, List.of("admin"));
+
+        Assert.assertEquals(status(() -> auth.updateRole(kim, "keeper", "",
+                List.of(Permission.ROLES_MANAGE.key()))), 400, "nobody could manage users");
+        Assert.assertEquals(status(() -> auth.updateRole(kim, "keeper", "",
+                List.of(Permission.USERS_MANAGE.key()))), 400, "nobody could manage roles");
+    }
+
+    // ---------------- viewing ----------------
+
+    @Test
+    public void viewersSeeUsersAndRolesButChangeNothing() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "auditor", "", List.of(Permission.USERS_VIEW.key(), Permission.ROLES_VIEW.key()));
+        auth.createUser(admin, "vera", null, "veras long password", List.of("auditor"));
+        Principal vera = auth.login("vera", "veras long password").principal();
+
+        Assert.assertEquals(auth.listUsers(vera).size(), 2);
+        Assert.assertFalse(auth.listRoles(vera).isEmpty());
+        Assert.assertEquals(status(() -> auth.createUser(vera, "x", null, "long enough pass", List.of("auditor"))),
+                403);
+        Assert.assertEquals(status(() -> auth.createRole(vera, "x", "", List.of(Permission.USERS_VIEW.key()))),
+                403);
+    }
+
+    // Modifying something includes seeing it, so roles from before view permissions existed keep working
+    @Test
+    public void managingIncludesViewing() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "user-admin", "", List.of(Permission.USERS_MANAGE.key()));
+        auth.createUser(admin, "uma", null, "umas long password", List.of("user-admin"));
+        Principal uma = auth.login("uma", "umas long password").principal();
+
+        Assert.assertTrue(uma.can(Permission.USERS_VIEW));
+        Assert.assertFalse(uma.can(Permission.ROLES_VIEW));
+        Assert.assertEquals(auth.listUsers(uma).size(), 2);
+        Assert.assertFalse(auth.listRoles(uma).isEmpty(), "those who assign roles see them");
+    }
+
+    @Test
+    public void aViewerCannotSeeWhatTheyWereNotGiven() {
+        Principal admin = firstAdmin().principal();
+        auth.createRole(admin, "people", "", List.of(Permission.USERS_VIEW.key()));
+        auth.createUser(admin, "pia", null, "pias long password", List.of("people"));
+        Principal pia = auth.login("pia", "pias long password").principal();
+        Assert.assertEquals(status(() -> auth.listRoles(pia)), 403);
+    }
+
     @Test
     public void theSchemaCanRunAgain() throws Exception {
         firstAdmin();

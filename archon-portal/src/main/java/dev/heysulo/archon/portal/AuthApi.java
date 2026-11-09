@@ -5,7 +5,6 @@ import dev.heysulo.archon.portal.auth.AuthException;
 import dev.heysulo.archon.portal.auth.AuthService;
 import dev.heysulo.archon.portal.auth.Permission;
 import dev.heysulo.archon.portal.auth.Principal;
-import dev.heysulo.archon.portal.auth.RoleRecord;
 import dev.heysulo.archon.portal.auth.AuthStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +33,7 @@ import java.util.regex.Pattern;
 final class AuthApi {
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthApi.class);
     private static final Pattern USER_PATH = Pattern.compile("/api/users/(\\d+)(/password)?");
+    private static final Pattern ROLE_PATH = Pattern.compile("/api/roles/([a-z0-9][a-z0-9._-]{0,63})");
 
     private final AuthService auth;
 
@@ -84,7 +84,14 @@ final class AuthApi {
     record PermissionView(String key, String description) {
     }
 
-    record RolesView(List<RoleRecord> roles, List<PermissionView> permissions) {
+    record RolesView(List<AuthService.RoleView> roles, List<PermissionView> permissions) {
+    }
+
+    // Filled by Gson
+    static final class RoleRequest {
+        String id;
+        String description;
+        List<String> permissions;
     }
 
     /** The signed-in user, if the request carries a valid session cookie. */
@@ -175,15 +182,47 @@ final class AuthApi {
         });
     }
 
+    /**
+     * {@code GET /api/roles} every role with who holds it, and every permission there is; {@code POST /api/roles},
+     * {@code PUT /api/roles/{id}} and {@code DELETE /api/roles/{id}} manage them ({@code roles:manage}).
+     */
     void handleRoles(HttpExchange exchange) throws IOException {
         guarded(exchange, () -> {
-            if (!exchange.getRequestMethod().equals("GET")) {
-                Http.sendError(exchange, 405, "Method not allowed");
+            Principal actor = signedIn(exchange);
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
+            if (path.equals("/api/roles") || path.equals("/api/roles/")) {
+                if (method.equals("GET")) {
+                    List<PermissionView> permissions = Arrays.stream(Permission.values())
+                            .map(permission -> new PermissionView(permission.key(), permission.description()))
+                            .toList();
+                    Http.sendJson(exchange, 200, new RolesView(auth.listRoles(actor), permissions));
+                } else if (method.equals("POST")) {
+                    Http.requireSameOrigin(exchange);
+                    RoleRequest body = Http.readJson(exchange, RoleRequest.class);
+                    Http.sendJson(exchange, 201, auth.createRole(actor, body.id, body.description,
+                            body.permissions));
+                } else {
+                    Http.sendError(exchange, 405, "Method not allowed");
+                }
                 return;
             }
-            List<PermissionView> permissions = Arrays.stream(Permission.values())
-                    .map(permission -> new PermissionView(permission.key(), permission.description())).toList();
-            Http.sendJson(exchange, 200, new RolesView(auth.listRoles(signedIn(exchange)), permissions));
+            Matcher match = ROLE_PATH.matcher(path);
+            if (!match.matches()) {
+                Http.sendError(exchange, 404, "Not found");
+                return;
+            }
+            String id = match.group(1);
+            Http.requireSameOrigin(exchange);
+            if (method.equals("PUT")) {
+                RoleRequest body = Http.readJson(exchange, RoleRequest.class);
+                Http.sendJson(exchange, 200, auth.updateRole(actor, id, body.description, body.permissions));
+            } else if (method.equals("DELETE")) {
+                auth.deleteRole(actor, id);
+                Http.sendNoContent(exchange);
+            } else {
+                Http.sendError(exchange, 405, "Method not allowed");
+            }
         });
     }
 

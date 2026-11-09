@@ -1,6 +1,7 @@
 import { ActionIcon, AppShell, Burger, Group, NavLink, Text, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconAdjustments, IconMoon, IconPlugConnected, IconServer2, IconSun, IconUsers } from "@tabler/icons-react";
+import { IconAdjustments, IconMoon, IconPlugConnected, IconServer2, IconShieldLock, IconSun, IconUsers }
+  from "@tabler/icons-react";
 import { Link, Outlet, useLocation } from "react-router";
 import { ProcessStreamProvider } from "../api/processStream";
 import { useAuth } from "../auth/AuthProvider";
@@ -16,7 +17,8 @@ const PAGES: { path: string; label: string; icon: typeof IconServer2; permission
   { path: "/processes", label: "Processes", icon: IconServer2, permission: PERMISSIONS.processesView },
   { path: "/services", label: "Services", icon: IconPlugConnected, permission: PERMISSIONS.servicesView },
   { path: "/configs", label: "Configurations", icon: IconAdjustments, permission: PERMISSIONS.configsView },
-  { path: "/users", label: "Users", icon: IconUsers, permission: PERMISSIONS.usersManage },
+  { path: "/users", label: "Users", icon: IconUsers, permission: PERMISSIONS.usersView },
+  { path: "/roles", label: "Roles", icon: IconShieldLock, permission: PERMISSIONS.rolesView },
 ];
 
 function ColorSchemeToggle() {

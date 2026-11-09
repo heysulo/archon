@@ -7,6 +7,7 @@ import { SetupPage } from "./pages/auth/SetupPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProcessesPage } from "./pages/processes/ProcessesPage";
 import { ConfigsPage } from "./pages/configs/ConfigsPage";
+import { RolesPage } from "./pages/roles/RolesPage";
 import { ServicesPage } from "./pages/services/ServicesPage";
 import { UsersPage } from "./pages/users/UsersPage";
 
@@ -49,8 +50,16 @@ export const routes: RouteObject[] = [
           {
             path: "users",
             element: (
-              <RequirePermission permission={PERMISSIONS.usersManage}>
+              <RequirePermission permission={PERMISSIONS.usersView}>
                 <UsersPage />
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "roles",
+            element: (
+              <RequirePermission permission={PERMISSIONS.rolesView}>
+                <RolesPage />
               </RequirePermission>
             ),
           },

@@ -15,7 +15,12 @@ export interface User {
 export interface Role {
   id: string;
   description: string;
+  /** Permission keys; the built-in admin role holds `*`, every permission. */
   permissions: string[];
+  /** The admin role: it holds every permission and cannot be changed or deleted. */
+  builtIn: boolean;
+  /** Usernames holding the role. */
+  users: string[];
 }
 
 export interface PermissionInfo {
@@ -47,14 +52,19 @@ export function useUsers() {
   return useQuery({ queryKey: USERS, queryFn: () => api<User[]>("/api/users") });
 }
 
-export function useRoles() {
-  return useQuery({ queryKey: ["roles"], queryFn: () => api<RolesResponse>("/api/roles") });
+export const ROLES = ["roles"] as const;
+
+/** @param enabled false skips the request, for those who may not see roles */
+export function useRoles(enabled = true) {
+  return useQuery({ queryKey: ROLES, queryFn: () => api<RolesResponse>("/api/roles"), enabled });
 }
 
 /** Every change refreshes the list afterwards, so it always shows what the portal stored. */
 export function useUserMutations() {
   const client = useQueryClient();
-  const refresh = () => client.invalidateQueries({ queryKey: USERS });
+  // Roles list who holds them, so they change with users too
+  const refresh = () =>
+    Promise.all([client.invalidateQueries({ queryKey: USERS }), client.invalidateQueries({ queryKey: ROLES })]);
   return {
     create: useMutation({
       mutationFn: (user: NewUser) => api<User>("/api/users", { method: "POST", body: user }),

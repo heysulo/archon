@@ -176,6 +176,56 @@ public final class AuthStore {
                 });
     }
 
+    public void createRole(String id, String description, Collection<String> permissions, Instant now) {
+        transaction(connection -> {
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO portal_roles (id, description, created_at) VALUES (?, ?, ?)")) {
+                insert.setString(1, id);
+                insert.setString(2, description);
+                setTime(insert, 3, now);
+                insert.executeUpdate();
+            }
+            replacePermissions(connection, id, permissions);
+            return null;
+        });
+    }
+
+    public void updateRole(String id, String description, Collection<String> permissions) {
+        transaction(connection -> {
+            try (PreparedStatement update =
+                         connection.prepareStatement("UPDATE portal_roles SET description = ? WHERE id = ?")) {
+                update.setString(1, description);
+                update.setString(2, id);
+                update.executeUpdate();
+            }
+            replacePermissions(connection, id, permissions);
+            return null;
+        });
+    }
+
+    /** Its permissions go with it. Callers make sure no user holds it first. */
+    public void deleteRole(String id) {
+        update("DELETE FROM portal_roles WHERE id = ?", statement -> statement.setString(1, id));
+    }
+
+    private void replacePermissions(Connection connection, String roleId, Collection<String> permissions)
+            throws SQLException {
+        try (PreparedStatement delete =
+                     connection.prepareStatement("DELETE FROM portal_role_permissions WHERE role_id = ?")) {
+            delete.setString(1, roleId);
+            delete.executeUpdate();
+        }
+        try (PreparedStatement insert = connection.prepareStatement(
+                "INSERT INTO portal_role_permissions (role_id, permission) VALUES (?, ?)")) {
+            for (String permission : new HashSet<>(permissions)) {
+                insert.setString(1, roleId);
+                insert.setString(2, permission);
+                insert.addBatch();
+            }
+            insert.executeBatch();
+        }
+    }
+
     // ---------------- sessions ----------------
 
     public void createSession(String tokenHash, long userId, Instant now, Instant expiresAt) {

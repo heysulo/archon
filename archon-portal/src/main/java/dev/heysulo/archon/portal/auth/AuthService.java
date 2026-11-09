@@ -13,9 +13,11 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.HexFormat;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -35,6 +37,8 @@ public final class AuthService {
     static final int MIN_PASSWORD_LENGTH = 10;
     static final int MAX_PASSWORD_LENGTH = 256;
     private static final Pattern USERNAME = Pattern.compile("[a-z0-9][a-z0-9._-]{1,63}");
+    private static final Pattern ROLE_ID = Pattern.compile("[a-z0-9][a-z0-9._-]{0,63}");
+    private static final int MAX_ROLE_DESCRIPTION = 255;
     private static final int MAX_DISPLAY_NAME = 128;
     private static final String BAD_LOGIN = "Wrong username or password";
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthService.class);
@@ -57,6 +61,20 @@ public final class AuthService {
 
     /** A new session: the token for the browser's cookie, and who it belongs to. */
     public record Session(String token, Principal principal) {
+    }
+
+    /**
+     * A role as the portal's API shows it.
+     *
+     * @param builtIn whether it is the admin role, which holds every permission and cannot be changed or deleted
+     * @param users   the usernames holding it
+     */
+    public record RoleView(String id, String description, Set<String> permissions, boolean builtIn,
+                           List<String> users) {
+        public RoleView {
+            permissions = Set.copyOf(permissions);
+            users = List.copyOf(users);
+        }
     }
 
     /** A user as the portal's API shows it, without the password hash. */
@@ -180,13 +198,144 @@ public final class AuthService {
     // ---------------- managing users ----------------
 
     public List<UserView> listUsers(Principal actor) {
-        require(actor, Permission.USERS_MANAGE);
+        require(actor, Permission.USERS_VIEW);
         return store.listUsers().stream().map(UserView::of).toList();
     }
 
-    public List<RoleRecord> listRoles(Principal actor) {
-        require(actor, Permission.USERS_MANAGE);
-        return store.listRoles();
+    /** Every role and who holds it, for those who see roles, or manage users and so assign them. */
+    public List<RoleView> listRoles(Principal actor) {
+        if (!actor.can(Permission.USERS_MANAGE) && !actor.can(Permission.ROLES_VIEW)) {
+            throw AuthException.forbidden("You do not have permission to see roles");
+        }
+        return roleViews();
+    }
+
+    private List<RoleView> roleViews() {
+        List<UserRecord> users = store.listUsers();
+        return store.listRoles().stream().map(role -> new RoleView(role.id(), role.description(), role.permissions(),
+                ADMIN_ROLE.equals(role.id()), users.stream().filter(user -> user.roles().contains(role.id()))
+                        .map(UserRecord::username).sorted().toList())).toList();
+    }
+
+    // ---------------- managing roles ----------------
+
+    /**
+     * Adds a role. Its permissions must be ones the actor holds: no one can grant more than they have.
+     */
+    public synchronized RoleView createRole(Principal actor, String id, String description,
+            Collection<String> permissions) {
+        require(actor, Permission.ROLES_MANAGE);
+        String roleId = id == null ? "" : id.trim();
+        if (!ROLE_ID.matcher(roleId).matches()) {
+            throw AuthException.badRequest("A role id is 1 to 64 lowercase letters, digits, dots, dashes or "
+                    + "underscores, starting with a letter or digit");
+        }
+        if (findRole(roleId).isPresent()) {
+            throw AuthException.conflict("A role named " + roleId + " exists");
+        }
+        Set<String> granted = grantable(actor, permissions);
+        store.createRole(roleId, validRoleDescription(description), granted, clock.instant());
+        LOGGER.info("{} created role {} with {}", actor.username(), roleId, granted);
+        return view(roleId);
+    }
+
+    /**
+     * Changes a role's description and permissions, for everyone holding it, from their next request. The admin role
+     * cannot change. No change may leave nobody able to manage users or roles.
+     */
+    public synchronized RoleView updateRole(Principal actor, String id, String description,
+            Collection<String> permissions) {
+        require(actor, Permission.ROLES_MANAGE);
+        RoleRecord role = findRole(id).orElseThrow(() -> AuthException.notFound("No such role"));
+        if (ADMIN_ROLE.equals(role.id())) {
+            throw AuthException.badRequest("The admin role is built in and holds every permission");
+        }
+        Set<String> granted = grantable(actor, permissions);
+        Set<String> removed = new HashSet<>(role.permissions());
+        removed.removeAll(granted);
+        if (!removed.isEmpty()) {
+            requireStillManageable(role.id(), granted, actor);
+        }
+        store.updateRole(role.id(), validRoleDescription(description), granted);
+        LOGGER.info("{} changed role {} to {}", actor.username(), role.id(), granted);
+        return view(role.id());
+    }
+
+    /** Deletes a role nobody holds. The admin role stays. */
+    public synchronized void deleteRole(Principal actor, String id) {
+        require(actor, Permission.ROLES_MANAGE);
+        RoleRecord role = findRole(id).orElseThrow(() -> AuthException.notFound("No such role"));
+        if (ADMIN_ROLE.equals(role.id())) {
+            throw AuthException.badRequest("The admin role is built in and cannot be deleted");
+        }
+        List<String> holders = store.listUsers().stream().filter(user -> user.roles().contains(role.id()))
+                .map(UserRecord::username).sorted().toList();
+        if (!holders.isEmpty()) {
+            throw AuthException.conflict("Take the role away from " + String.join(", ", holders) + " first");
+        }
+        store.deleteRole(role.id());
+        LOGGER.info("{} deleted role {}", actor.username(), role.id());
+    }
+
+    private Optional<RoleRecord> findRole(String id) {
+        return store.listRoles().stream().filter(role -> role.id().equals(id)).findFirst();
+    }
+
+    private RoleView view(String id) {
+        return roleViews().stream().filter(role -> role.id().equals(id)).findFirst().orElseThrow();
+    }
+
+    /** Known permissions only, at least one, never {@code *}, and only ones the actor holds. */
+    private static Set<String> grantable(Principal actor, Collection<String> permissions) {
+        if (permissions == null || permissions.isEmpty()) {
+            throw AuthException.badRequest("Give the role at least one permission");
+        }
+        Set<String> granted = new HashSet<>();
+        for (String key : permissions) {
+            Permission permission = Permission.byKey(key)
+                    .orElseThrow(() -> AuthException.badRequest("Unknown permission " + key));
+            if (!actor.can(permission)) {
+                throw AuthException.forbidden("You cannot grant " + permission.key() + ", which you do not hold");
+            }
+            granted.add(permission.key());
+        }
+        return Set.copyOf(granted);
+    }
+
+    private static String validRoleDescription(String description) {
+        String trimmed = description == null ? "" : description.trim();
+        if (trimmed.length() > MAX_ROLE_DESCRIPTION) {
+            throw AuthException.badRequest("A role description is at most " + MAX_ROLE_DESCRIPTION + " characters");
+        }
+        return trimmed;
+    }
+
+    /**
+     * Refuses a change to a role's permissions that would leave no enabled user able to manage users, or roles, or
+     * take role management from the actor making it.
+     */
+    private void requireStillManageable(String roleId, Set<String> newPermissions, Principal actor) {
+        Map<String, Set<String>> permissionsByRole = new HashMap<>();
+        store.listRoles().forEach(role -> permissionsByRole.put(role.id(), role.permissions()));
+        permissionsByRole.put(roleId, newPermissions);
+        List<UserRecord> enabled = store.listUsers().stream().filter(UserRecord::enabled).toList();
+        for (Permission needed : List.of(Permission.USERS_MANAGE, Permission.ROLES_MANAGE)) {
+            boolean someoneCan = enabled.stream().anyMatch(user -> grants(user.roles(), permissionsByRole, needed));
+            if (!someoneCan) {
+                throw AuthException.badRequest("At least one enabled user must be able to "
+                        + needed.description().toLowerCase(Locale.ROOT));
+            }
+        }
+        UserRecord self = store.findUserById(actor.userId()).orElse(null);
+        if (self != null && !grants(self.roles(), permissionsByRole, Permission.ROLES_MANAGE)) {
+            throw AuthException.badRequest("You cannot remove your own role management");
+        }
+    }
+
+    private static boolean grants(Set<String> roles, Map<String, Set<String>> permissionsByRole,
+            Permission permission) {
+        return roles.stream().map(role -> permissionsByRole.getOrDefault(role, Set.of())).anyMatch(granted ->
+                granted.contains(Permission.ALL) || granted.contains(permission.key()));
     }
 
     public synchronized UserView createUser(Principal actor, String username, String displayName, String password,
@@ -197,6 +346,7 @@ public final class AuthService {
             throw AuthException.conflict("The username " + name + " is taken");
         }
         Set<String> validRoles = validRoles(roles);
+        requireAssignable(actor, validRoles, Set.of());
         long id = store.createUser(name, validDisplayName(displayName, name), hasher.hash(validPassword(password)),
                 validRoles, clock.instant());
         LOGGER.info("{} created user {} with roles {}", actor.username(), name, validRoles);
@@ -208,6 +358,7 @@ public final class AuthService {
         require(actor, Permission.USERS_MANAGE);
         UserRecord user = store.findUserById(id).orElseThrow(() -> AuthException.notFound("No such user"));
         Set<String> validRoles = validRoles(roles);
+        requireAssignable(actor, validRoles, user.roles());
         if (id == actor.userId() && (!enabled || !grantsUserManagement(validRoles))) {
             throw AuthException.badRequest("You cannot disable yourself or remove your own user management");
         }
@@ -283,6 +434,24 @@ public final class AuthService {
         store.listRoles().stream().filter(role -> roles.contains(role.id()))
                 .forEach(role -> permissions.addAll(role.permissions()));
         return permissions;
+    }
+
+    /**
+     * Only roles whose permissions the actor holds can be given, so managing users never lets anyone gain more than
+     * they have. Roles the user already holds may stay.
+     */
+    private void requireAssignable(Principal actor, Set<String> roles, Set<String> alreadyHeld) {
+        for (RoleRecord role : store.listRoles()) {
+            if (!roles.contains(role.id()) || alreadyHeld.contains(role.id())) {
+                continue;
+            }
+            boolean holdsAll = actor.permissions().contains(Permission.ALL) || role.permissions().stream()
+                    .allMatch(permission -> Permission.byKey(permission).map(actor::can).orElse(false));
+            if (!holdsAll) {
+                throw AuthException.forbidden("You cannot give the " + role.id()
+                        + " role, which has permissions you do not hold");
+            }
+        }
     }
 
     private boolean grantsUserManagement(Set<String> roles) {

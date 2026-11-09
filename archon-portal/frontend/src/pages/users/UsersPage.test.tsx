@@ -28,6 +28,16 @@ describe("UsersPage", () => {
     expect(within(bob).getByText("Never")).toBeInTheDocument();
   });
 
+  it("shows users read-only to those who can only view them", async () => {
+    const calls = mockPortal({ "GET /api/users": { body: USERS } });
+    renderWith(<UsersPage />, { user: { id: 9, username: "vera", displayName: "Vera", roles: ["auditor"],
+      permissions: ["users:view"] } });
+    expect(await screen.findByText("alice")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add user" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Actions for alice")).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path === "/api/roles"), "roles are only needed for assigning").toBe(false);
+  });
+
   it("does not offer deleting yourself", async () => {
     renderWith(<UsersPage />);
     fireEvent.click(await screen.findByLabelText("Actions for alice"));

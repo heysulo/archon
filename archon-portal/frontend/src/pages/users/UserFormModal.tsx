@@ -2,6 +2,8 @@ import { Alert, Button, Group, Modal, MultiSelect, PasswordInput, Stack, Switch,
 import { useForm } from "@mantine/form";
 import { useState } from "react";
 import { passwordError, usernameError } from "../auth/passwordRules";
+import { useAuth } from "../../auth/AuthProvider";
+import { mayAssign } from "../roles/model";
 import type { Role, User } from "./usersApi";
 
 export interface UserFormValues {
@@ -67,7 +69,13 @@ function UserForm({ user, isSelf, roles, onClose, onSubmit }: Omit<Props, "opene
     }
   });
 
-  const roleOptions = roles.map((role) => ({ value: role.id, label: `${role.id} – ${role.description}` }));
+  // Only roles whose permissions you hold can be given; ones the user already holds may stay
+  const myPermissions = useAuth().user?.permissions ?? [];
+  const roleOptions = roles.map((role) => ({
+    value: role.id,
+    label: role.description ? `${role.id} – ${role.description}` : role.id,
+    disabled: !mayAssign(myPermissions, role) && !user?.roles.includes(role.id),
+  }));
 
   return (
     <form onSubmit={submit} noValidate>
