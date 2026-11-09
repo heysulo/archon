@@ -1,5 +1,6 @@
 import { process, snapshot } from "../../test/fixtures";
-import { groupProcesses, matches, roleOf, serviceLabel, stateTone, summarize } from "./model";
+import { DEFAULT_SORT, filterProcesses, matches, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
+  type ProcessFilters } from "./model";
 
 describe("roleOf", () => {
   it("names leaders and standbys of applications", () => {
@@ -45,24 +46,42 @@ describe("matches", () => {
   });
 });
 
-describe("groupProcesses", () => {
-  it("hides stopped instances unless asked, and lists applications before Archon", () => {
-    const groups = groupProcesses(snapshot.processes, { showStopped: false, query: "" });
-    expect(groups.map((group) => group.key)).toEqual(["Group/Application", "Archon/Registry"]);
-    expect(groups[0]!.processes.map((p) => p.rank)).toEqual([1, 2]);
-    expect(groups[0]!.stopped).toBe(0);
+const NONE: ProcessFilters = { query: "", showStopped: false, applications: [], states: [], link: "any" };
+const hosts = (list: typeof snapshot.processes) => list.map((process) => process.details?.host);
+
+describe("filterProcesses", () => {
+  it("hides stopped instances unless asked", () => {
+    expect(filterProcesses(snapshot.processes, NONE)).toHaveLength(4);
+    expect(filterProcesses(snapshot.processes, { ...NONE, showStopped: true })).toHaveLength(5);
   });
 
-  it("includes stopped instances when asked", () => {
-    const groups = groupProcesses(snapshot.processes, { showStopped: true, query: "" });
-    expect(groups[0]!.processes.map((p) => p.rank)).toEqual([1, 2, 3]);
-    expect(groups[0]).toMatchObject({ running: 2, stopped: 1 });
+  it("filters by application, state, registry link and search together", () => {
+    expect(hosts(filterProcesses(snapshot.processes, { ...NONE, applications: ["Archon:Registry"] })))
+      .toEqual(["archon-registry-1", "archon-registry-0"]);
+    expect(hosts(filterProcesses(snapshot.processes, { ...NONE, showStopped: true, states: ["KILLED"] })))
+      .toEqual(["hello-world-java-dead1"]);
+    expect(hosts(filterProcesses(snapshot.processes, { ...NONE, showStopped: true, link: "disconnected" })))
+      .toEqual(["hello-world-java-dead1"]);
+    expect(hosts(filterProcesses(snapshot.processes, { ...NONE, applications: ["Archon:Registry"],
+      query: "registry-0" }))).toEqual(["archon-registry-0"]);
+  });
+});
+
+describe("sortProcesses", () => {
+  const all = filterProcesses(snapshot.processes, { ...NONE, showStopped: true });
+
+  it("lists applications before Archon by default, each by rank", () => {
+    expect(hosts(sortProcesses(all, DEFAULT_SORT))).toEqual(["hello-world-java-4vsbc", "hello-world-java-94fdt",
+      "hello-world-java-dead1", "archon-registry-1", "archon-registry-0"]);
   });
 
-  it("drops groups with nothing matching the search", () => {
-    const groups = groupProcesses(snapshot.processes, { showStopped: false, query: "registry-0" });
-    expect(groups).toHaveLength(1);
-    expect(groups[0]!.processes.map((p) => p.details?.host)).toEqual(["archon-registry-0"]);
+  it("sorts by any column either way, keeping blanks last", () => {
+    expect(hosts(sortProcesses(all, { column: "host", descending: false }))[0]).toBe("archon-registry-0");
+    expect(hosts(sortProcesses(all, { column: "host", descending: true }))[0]).toBe("hello-world-java-dead1");
+    const byAddress = sortProcesses(all, { column: "address", descending: true });
+    expect(byAddress.at(-1)!.details?.address).toBeUndefined();
+    expect(byAddress[0]!.details?.address).toBe("192.168.192.86");
+    expect(sortProcesses(all, { column: "rank", descending: true })[0]!.rank).toBe(3);
   });
 });
 

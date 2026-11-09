@@ -4,15 +4,6 @@ import type { ProcessInfo } from "../../api/types";
 /** Archon's own components, the registries and portals, rank as one primary and any number of mirrors. */
 export const ARCHON_GROUP = "Archon";
 
-export interface ApplicationGroup {
-  key: string;
-  group: string;
-  name: string;
-  processes: ProcessInfo[];
-  running: number;
-  stopped: number;
-}
-
 export interface Role {
   label: string;
   /** Holds rank 1 now. */
@@ -52,32 +43,79 @@ export function matches(process: ProcessInfo, query: string): boolean {
     .some((value) => value.toLowerCase().includes(needle));
 }
 
-interface GroupOptions {
-  showStopped: boolean;
+export const applicationOf = (process: ProcessInfo) => `${process.group}:${process.name}`;
+
+export type LinkFilter = "any" | "connected" | "disconnected";
+
+export interface ProcessFilters {
   query: string;
+  showStopped: boolean;
+  /** `Group:Name` of the applications to show; empty shows all. */
+  applications: string[];
+  /** Run levels to show; empty shows all. */
+  states: string[];
+  link: LinkFilter;
 }
 
-/** Groups instances by application: applications first, Archon's own components last, each ordered by rank. */
-export function groupProcesses(processes: ProcessInfo[], { showStopped, query }: GroupOptions): ApplicationGroup[] {
-  const groups = new Map<string, ApplicationGroup>();
-  for (const process of processes) {
-    if (!showStopped && !process.running) continue;
-    if (!matches(process, query)) continue;
-    const key = `${process.group}/${process.name}`;
-    let group = groups.get(key);
-    if (!group) {
-      group = { key, group: process.group, name: process.name, processes: [], running: 0, stopped: 0 };
-      groups.set(key, group);
-    }
-    group.processes.push(process);
-    if (process.running) group.running += 1;
-    else group.stopped += 1;
+export function filterProcesses(processes: ProcessInfo[], filters: ProcessFilters): ProcessInfo[] {
+  return processes.filter((process) =>
+    (filters.showStopped || process.running)
+    && (filters.applications.length === 0 || filters.applications.includes(applicationOf(process)))
+    && (filters.states.length === 0 || filters.states.includes(process.runLevel))
+    && (filters.link === "any" || process.connected === (filters.link === "connected"))
+    && matches(process, filters.query));
+}
+
+export type SortColumn = "application" | "rank" | "role" | "state" | "host" | "address" | "node" | "link"
+  | "services";
+
+export interface Sort {
+  column: SortColumn;
+  descending: boolean;
+}
+
+export const DEFAULT_SORT: Sort = { column: "application", descending: false };
+
+const text = (value: string | undefined) => value ?? "";
+// Missing values sort last whichever way the column is sorted
+const blankLast = (a: string, b: string, descending: boolean) =>
+  a === b ? 0 : !a ? (descending ? -1 : 1) : !b ? (descending ? 1 : -1) : a.localeCompare(b, undefined,
+    { numeric: true });
+
+// Applications before Archon's own components, then by name and rank, running records before stopped ones
+function defaultOrder(a: ProcessInfo, b: ProcessInfo): number {
+  const archon = (process: ProcessInfo) => Number(process.group === ARCHON_GROUP);
+  return archon(a) - archon(b) || applicationOf(a).localeCompare(applicationOf(b)) || a.rank - b.rank
+    || Number(b.running) - Number(a.running) || text(a.details?.host).localeCompare(text(b.details?.host));
+}
+
+function compareBy(column: SortColumn, a: ProcessInfo, b: ProcessInfo, descending: boolean): number {
+  switch (column) {
+    case "application":
+      return defaultOrder(a, b);
+    case "rank":
+      return a.rank - b.rank;
+    case "role":
+      return roleOf(a).label.localeCompare(roleOf(b).label);
+    case "state":
+      return a.runLevel.localeCompare(b.runLevel);
+    case "host":
+      return blankLast(text(a.details?.host), text(b.details?.host), descending);
+    case "address":
+      return blankLast(text(a.details?.address), text(b.details?.address), descending);
+    case "node":
+      return blankLast(text(a.details?.node), text(b.details?.node), descending);
+    case "link":
+      return Number(b.connected) - Number(a.connected);
+    case "services":
+      return a.services.length - b.services.length;
   }
-  for (const group of groups.values()) {
-    group.processes.sort((a, b) => a.rank - b.rank || Number(b.running) - Number(a.running));
-  }
-  const isArchon = (group: ApplicationGroup) => group.group === ARCHON_GROUP;
-  return [...groups.values()].sort((a, b) => Number(isArchon(a)) - Number(isArchon(b)) || a.key.localeCompare(b.key));
+}
+
+/** Sorts by the column, then in the default order, so equal rows keep a stable place. */
+export function sortProcesses(processes: ProcessInfo[], { column, descending }: Sort): ProcessInfo[] {
+  const sign = descending ? -1 : 1;
+  return [...processes].sort((a, b) => sign * compareBy(column, a, b, descending) || defaultOrder(a, b));
 }
 
 export interface Summary {

@@ -1,10 +1,12 @@
-import { Alert, Center, Group, Loader, Paper, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Badge, Box, Button, Card, Center, Code, Group, Loader, MultiSelect, Paper, Select, SimpleGrid, Stack,
+  Switch, Table, Text, TextInput, Title, UnstyledButton } from "@mantine/core";
 import { useLocalStorage } from "@mantine/hooks";
-import { IconAlertTriangle, IconSearch } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconSearch, IconSelector } from "@tabler/icons-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useProcessStream } from "../../api/processStream";
-import { ApplicationCard } from "./ApplicationCard";
-import { groupProcesses, summarize } from "./model";
+import type { ProcessInfo } from "../../api/types";
+import { applicationOf, DEFAULT_SORT, filterProcesses, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
+  type LinkFilter, type Sort, type SortColumn } from "./model";
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
@@ -19,14 +21,141 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
+function Detail({ value }: { value: string | undefined }) {
+  return value ? (
+    <Text size="xs" ff="monospace">
+      {value}
+    </Text>
+  ) : (
+    <Text size="sm" c="dimmed">
+      –
+    </Text>
+  );
+}
+
+function SortableHeader({ column, sort, onSort, children }: {
+  column: SortColumn;
+  sort: Sort;
+  onSort: (column: SortColumn) => void;
+  children: ReactNode;
+}) {
+  const active = sort.column === column;
+  const Icon = !active ? IconSelector : sort.descending ? IconChevronDown : IconChevronUp;
+  return (
+    <Table.Th aria-sort={active ? (sort.descending ? "descending" : "ascending") : "none"}>
+      <UnstyledButton onClick={() => onSort(column)} aria-label={`Sort by ${String(children).toLowerCase()}`}>
+        <Group gap={4} wrap="nowrap">
+          <Text size="sm" fw={600}>
+            {children}
+          </Text>
+          <Icon size={14} stroke={1.5} />
+        </Group>
+      </UnstyledButton>
+    </Table.Th>
+  );
+}
+
+function Row({ process, showNode }: { process: ProcessInfo; showNode: boolean }) {
+  const role = roleOf(process);
+  return (
+    <Table.Tr style={role.former ? { opacity: 0.55 } : undefined}>
+      <Table.Td>
+        <Text size="sm" ff="monospace" fw={500}>
+          {applicationOf(process)}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        <Text size="sm" ff="monospace">
+          {process.rank}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        <Text size="sm" fw={role.lead ? 600 : 400} c={role.lead ? "indigo" : role.former ? "dimmed" : undefined}>
+          {role.label}
+        </Text>
+      </Table.Td>
+      {/* Wide enough for the longest state, so the badge never truncates */}
+      <Table.Td miw={120}>
+        <Badge variant="light" color={stateTone(process)} radius="sm" style={{ overflow: "visible" }}>
+          {process.runLevel}
+        </Badge>
+      </Table.Td>
+      <Table.Td>
+        <Detail value={process.details?.host} />
+      </Table.Td>
+      <Table.Td>
+        <Detail value={process.details?.address} />
+      </Table.Td>
+      {showNode && (
+        <Table.Td>
+          <Detail value={process.details?.node} />
+        </Table.Td>
+      )}
+      <Table.Td>
+        <Group gap={6} wrap="nowrap">
+          <Box w={8} h={8} bg={process.connected ? "green.6" : "red.6"} style={{ borderRadius: "50%" }} />
+          <Text size="sm">{process.connected ? "Connected" : "Disconnected"}</Text>
+        </Group>
+      </Table.Td>
+      <Table.Td>
+        {process.services.length ? (
+          <Group gap={4} wrap="nowrap">
+            {process.services.map((service) => (
+              <Code key={service} title={service}>
+                {serviceLabel(service, process.details?.address)}
+              </Code>
+            ))}
+          </Group>
+        ) : (
+          <Text size="sm" c="dimmed">
+            –
+          </Text>
+        )}
+      </Table.Td>
+    </Table.Tr>
+  );
+}
+
+const LINKS: { value: LinkFilter; label: string }[] = [
+  { value: "any", label: "Any registry link" },
+  { value: "connected", label: "Connected" },
+  { value: "disconnected", label: "Disconnected" },
+];
+
 export function ProcessesPage() {
   const { snapshot, status, error } = useProcessStream();
   const [query, setQuery] = useState("");
+  const [applications, setApplications] = useState<string[]>([]);
+  const [states, setStates] = useState<string[]>([]);
+  const [link, setLink] = useState<LinkFilter>("any");
   const [showStopped, setShowStopped] = useLocalStorage({ key: "archon.processes.showStopped", defaultValue: false });
+  const [sort, setSort] = useLocalStorage<Sort>({ key: "archon.processes.sort", defaultValue: DEFAULT_SORT });
 
   const processes = useMemo(() => snapshot?.processes ?? [], [snapshot]);
   const summary = useMemo(() => summarize(processes), [processes]);
-  const groups = useMemo(() => groupProcesses(processes, { showStopped, query }), [processes, showStopped, query]);
+  const applicationChoices = useMemo(() => [...new Set(processes.map(applicationOf))].sort(), [processes]);
+  const stateChoices = useMemo(() => [...new Set(processes.map((process) => process.runLevel))].sort(), [processes]);
+  const rows = useMemo(
+    () => sortProcesses(filterProcesses(processes, { query, showStopped, applications, states, link }), sort),
+    [processes, query, showStopped, applications, states, link, sort],
+  );
+  const showNode = rows.some((process) => process.details?.node);
+  const filtered = query.trim() !== "" || applications.length > 0 || states.length > 0 || link !== "any";
+
+  // A new column sorts ascending; the same column again flips it
+  const onSort = (column: SortColumn) =>
+    setSort((current) => ({ column, descending: current.column === column ? !current.descending : false }));
+  const clearFilters = () => {
+    setQuery("");
+    setApplications([]);
+    setStates([]);
+    setLink("any");
+  };
+  const header = (column: SortColumn, label: string) => (
+    <SortableHeader column={column} sort={sort} onSort={onSort}>
+      {label}
+    </SortableHeader>
+  );
 
   return (
     <Stack gap="md">
@@ -54,30 +183,94 @@ export function ProcessesPage() {
         <Stat label="Services served" value={snapshot ? summary.services : "–"} />
       </SimpleGrid>
 
-      <Group>
+      <Group align="flex-end" gap="sm">
         <TextInput
-          style={{ flex: 1, minWidth: 220 }}
+          style={{ flex: 2, minWidth: 220 }}
           placeholder="Search by name, pod, address, node or service"
           leftSection={<IconSearch size={16} />}
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
           aria-label="Search processes"
         />
+        <MultiSelect
+          style={{ flex: 1, minWidth: 200 }}
+          placeholder={applications.length ? undefined : "All applications"}
+          data={applicationChoices}
+          value={applications}
+          onChange={setApplications}
+          searchable
+          clearable
+          aria-label="Filter by application"
+        />
+        <MultiSelect
+          style={{ flex: 1, minWidth: 160 }}
+          placeholder={states.length ? undefined : "All states"}
+          data={stateChoices}
+          value={states}
+          onChange={setStates}
+          clearable
+          aria-label="Filter by state"
+        />
+        <Select
+          style={{ minWidth: 170 }}
+          data={LINKS}
+          value={link}
+          onChange={(value) => setLink((value as LinkFilter | null) ?? "any")}
+          allowDeselect={false}
+          aria-label="Filter by registry link"
+        />
         <Switch
           label="Show stopped"
           checked={showStopped}
           onChange={(event) => setShowStopped(event.currentTarget.checked)}
+          mb={8}
         />
       </Group>
 
       {!snapshot ? (
         <Center py="xl">{status === "connecting" ? <Loader /> : <Text c="dimmed">No data yet</Text>}</Center>
-      ) : groups.length === 0 ? (
+      ) : rows.length === 0 ? (
         <Center py="xl">
-          <Text c="dimmed">{query ? "No processes match the search" : "No running processes"}</Text>
+          <Stack align="center" gap="xs">
+            <Text c="dimmed">{filtered ? "No processes match the filters" : "No running processes"}</Text>
+            {filtered && (
+              <Button variant="subtle" size="xs" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </Stack>
         </Center>
       ) : (
-        groups.map((group) => <ApplicationCard key={group.key} group={group} />)
+        <Card withBorder padding={0} radius="md">
+          {/* Narrow screens scroll the table sideways rather than wrapping pod names and squeezing badges */}
+          <Box style={{ overflowX: "auto" }}>
+            <Table verticalSpacing="xs" striped highlightOnHover miw={1000} style={{ whiteSpace: "nowrap" }}>
+              <Table.Thead>
+                <Table.Tr>
+                  {header("application", "Application")}
+                  {header("rank", "Rank")}
+                  {header("role", "Role")}
+                  {header("state", "State")}
+                  {header("host", "Host")}
+                  {header("address", "Address")}
+                  {showNode && header("node", "Node")}
+                  {header("link", "Registry link")}
+                  {header("services", "Services")}
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((process) => (
+                  <Row key={`${applicationOf(process)}-${process.rank}-${process.details?.host ?? ""}-${process.runLevel}`}
+                       process={process} showNode={showNode} />
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Box>
+          <Text size="xs" c="dimmed" px="md" py="xs">
+            {rows.length === 1 ? "1 process" : `${rows.length} processes`}
+            {filtered || !showStopped ? ` shown of ${processes.length}` : ""}
+          </Text>
+        </Card>
       )}
     </Stack>
   );

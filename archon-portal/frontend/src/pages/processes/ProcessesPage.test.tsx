@@ -41,6 +41,17 @@ describe("ProcessesPage", () => {
     expect(screen.queryByText("hello-world-java-4vsbc")).not.toBeInTheDocument();
   });
 
+  it("shows every application in one table, sorted by a clicked column", () => {
+    renderPage({ snapshot, status: "live", error: null });
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    const firstHost = () => screen.getAllByRole("row")[1]!.textContent;
+    expect(firstHost()).toContain("hello-world-java-4vsbc");
+    fireEvent.click(screen.getByLabelText("Sort by host"));
+    expect(firstHost()).toContain("archon-registry-0");
+    fireEvent.click(screen.getByLabelText("Sort by host"));
+    expect(firstHost()).toContain("hello-world-java-94fdt");
+  });
+
   it("warns when the registry is unavailable but keeps the last state", () => {
     renderPage({ snapshot, status: "offline", error: "No primary registry is answering" });
     expect(screen.getByText(/No primary registry is answering/)).toBeInTheDocument();
