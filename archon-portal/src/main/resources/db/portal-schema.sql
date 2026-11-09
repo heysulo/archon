@@ -62,3 +62,20 @@ CREATE TABLE IF NOT EXISTS portal_setup_tokens (
 
 INSERT IGNORE INTO portal_roles (id, description, created_at) VALUES ('admin', 'Every permission', CURRENT_TIMESTAMP);
 INSERT IGNORE INTO portal_role_permissions (role_id, permission) VALUES ('admin', '*');
+
+-- Join tokens let an instance of an application definition get its first certificate from a registry when TLS is
+-- on. Only a hash of each token is kept. Registries create this table too; whichever starts first does.
+CREATE TABLE IF NOT EXISTS join_tokens (
+    id          BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    app_group   VARCHAR(128) NOT NULL,
+    app_name    VARCHAR(128) NOT NULL,
+    token_hash  CHAR(64)     NOT NULL,
+    description VARCHAR(255) NOT NULL DEFAULT '',
+    reusable    BOOLEAN      NOT NULL DEFAULT FALSE,
+    expires_at  TIMESTAMP    NULL,
+    used_at     TIMESTAMP    NULL,
+    use_count   INT          NOT NULL DEFAULT 0,
+    created_by  VARCHAR(128) NOT NULL DEFAULT '',
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_join_tokens_hash (token_hash)
+);

@@ -13,6 +13,8 @@ public class ServiceStartedMessage implements Message {
     private final String serviceId;
     private final String host;
     private final int port;
+    // Absent from instances that predate TLS, which read as false
+    private boolean secure;
 
     /**
      * @param host the address clients should connect to, or null for the registry to use the address it sees this
@@ -39,5 +41,15 @@ public class ServiceStartedMessage implements Message {
 
     public int getPort() {
         return port;
+    }
+
+    /** Whether the instance serves the service with TLS. */
+    public boolean isSecure() {
+        return secure;
+    }
+
+    public ServiceStartedMessage secure(boolean value) {
+        this.secure = value;
+        return this;
     }
 }

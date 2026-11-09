@@ -2,7 +2,9 @@ package dev.heysulo.archon.config;
 
 import dev.heysulo.archon.dictionary.sdk.RegistryProtocol;
 import dev.heysulo.archon.sdk.ArchonCallback;
+import dev.heysulo.archon.dictionary.tls.ArchonIdentity;
 import dev.heysulo.archon.sdk.ArchonInterface;
+import dev.heysulo.archon.sdk.tls.ArchonTls;
 import dev.heysulo.archon.sdk.config.ConfigReplicaClient;
 import dev.heysulo.archon.sdk.services.ServiceException;
 import dev.heysulo.databridge.core.server.Server;
@@ -77,6 +79,7 @@ public final class ConfigApplication implements ArchonCallback {
         ConfigApplication application = new ConfigApplication(service, new ConfigServer(service, new RegistryVerifier(),
                 workers));
         Runtime.getRuntime().addShutdownHook(new Thread(database::close, "config-shutdown"));
+        ArchonTls.configureForComponent(ArchonIdentity.CONFIG, () -> database.dataSource().getConnection());
         application.start();
     }
 

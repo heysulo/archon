@@ -16,6 +16,23 @@ public final class FakeConnection implements Connection {
     private final List<Message> sent = new CopyOnWriteArrayList<>();
     private volatile boolean connected = true;
     private volatile ConnectionCallback callback;
+    private volatile List<java.security.cert.Certificate> peerCertificates = List.of();
+
+    /** Makes the connection look secured by a peer that presented this certificate. */
+    public FakeConnection presenting(java.security.cert.X509Certificate certificate) {
+        this.peerCertificates = List.of(certificate);
+        return this;
+    }
+
+    @Override
+    public List<java.security.cert.Certificate> getPeerCertificates() {
+        return peerCertificates;
+    }
+
+    @Override
+    public boolean isSecure() {
+        return !peerCertificates.isEmpty();
+    }
 
     public void drop() {
         connected = false;

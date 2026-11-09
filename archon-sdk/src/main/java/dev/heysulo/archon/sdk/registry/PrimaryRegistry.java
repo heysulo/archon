@@ -62,7 +62,10 @@ public class PrimaryRegistry implements ClientCallback {
      */
     public void connect(String host) {
         connected = false;
-        Client client = new Client(host, RegistryConstants.PORT, this, eventLoopGroup);
+        Client client = new Client(host, RegistryConstants.PORT, this,
+                dev.heysulo.archon.sdk.tls.ArchonTls.get().registryContext(), eventLoopGroup);
+        // Registries are trusted by the identity in their certificate, not by address
+        client.setHostnameVerificationEnabled(false);
         client.settings().setHeartbeatInterval(RegistryConstants.HEARTBEAT_INTERVAL);
         client.settings().setConnectTimeout(RegistryConstants.CONNECT_TIMEOUT);
         connection = client;

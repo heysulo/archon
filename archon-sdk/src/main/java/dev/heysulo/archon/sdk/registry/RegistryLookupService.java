@@ -87,7 +87,9 @@ public class RegistryLookupService {
 
     private long primaryTerm(String registryLocation) {
         Lookup lookup = new Lookup();
-        Client lookupConnection = new Client(registryLocation, RegistryConstants.PORT, lookup, eventLoopGroup);
+        Client lookupConnection = new Client(registryLocation, RegistryConstants.PORT, lookup,
+                dev.heysulo.archon.sdk.tls.ArchonTls.get().registryContext(), eventLoopGroup);
+        lookupConnection.setHostnameVerificationEnabled(false);
         lookupConnection.settings().setConnectTimeout(RegistryConstants.CONNECT_TIMEOUT);
         try {
             lookupConnection.connect();

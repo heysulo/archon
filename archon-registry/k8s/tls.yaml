@@ -1,0 +1,18 @@
+# TLS for every Archon component and the applications in this cluster.
+#
+# mode: off, optional or required. Move a cluster across in steps: optional (servers accept TLS and plain, while
+# components switch over), then required once everything has joined. Restart the components after changing it.
+#
+# ca-fingerprint: the Archon CA's SHA-256 fingerprint, which applications pin. The first registry started with TLS
+# creates the CA and logs it; the portal shows it too. Public, but take it from a source you trust.
+#
+# The CA's private key is sealed in the database with a master key from a Secret, created once by hand and never
+# committed. Keep a copy: without it the CA cannot be opened, and every instance has to join again with a new one.
+#   kubectl create secret generic archon-ca --from-literal=master-key="$(openssl rand -base64 32)"
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: archon-tls
+data:
+  mode: "optional"
+  ca-fingerprint: ""

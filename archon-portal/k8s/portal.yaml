@@ -22,6 +22,12 @@ spec:
         env:
         - name: ARCHON_REGISTRY_LOCATIONS
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
+        # Joins through the database, so it needs no fingerprint or token; see archon-registry/k8s/tls.yaml
+        - name: ARCHON_TLS
+          valueFrom:
+            configMapKeyRef:
+              name: archon-tls
+              key: mode
         - name: PORTAL_PORT
           value: "8080"
         # Users and sessions live in the archon schema, through the same login as the registry

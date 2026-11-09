@@ -1,6 +1,10 @@
 package dev.heysulo.archon.sdk.services;
 
+import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceEndpoint;
+import dev.heysulo.archon.dictionary.tls.ArchonIdentity;
+import dev.heysulo.archon.sdk.tls.ArchonTls;
+import io.netty.handler.ssl.SslContext;
 import dev.heysulo.databridge.core.client.Client;
 import dev.heysulo.databridge.core.client.callback.ClientCallback;
 import dev.heysulo.databridge.core.common.Message;
@@ -31,6 +35,24 @@ final class DataBridgeServiceConnector implements ServiceConnection.Connector {
 
     @Override
     public ServiceConnection open(ServiceEndpoint endpoint, ServiceConnection.Listener listener) {
+        return open(null, endpoint, listener);
+    }
+
+    /**
+     * Connects with TLS when the instance serves it, and requires the instance to prove it is the service's owner.
+     * With TLS required, an instance serving in the clear is refused.
+     */
+    @Override
+    public ServiceConnection open(ServiceDefinition definition, ServiceEndpoint endpoint,
+            ServiceConnection.Listener listener) {
+        ArchonTls tls = ArchonTls.get();
+        SslContext context = null;
+        if (tls.enabled() && endpoint.secure() && definition != null) {
+            context = tls.serviceClientContext(new ArchonIdentity(definition.group(), definition.application()));
+        } else if (tls.required()) {
+            throw new ServiceException(String.format("The instance at %s:%d does not serve TLS, which is required",
+                    endpoint.host(), endpoint.port()));
+        }
         Client client = new Client(endpoint.host(), endpoint.port(), new ClientCallback() {
             @Override
             public void onConnect(Client connected) {
@@ -51,7 +73,9 @@ final class DataBridgeServiceConnector implements ServiceConnection.Connector {
             public void onError(Client failed, Throwable cause) {
                 listener.onError(cause);
             }
-        }, EVENT_LOOPS);
+        }, context, EVENT_LOOPS);
+        // Instances are trusted by the identity in their certificate, not by address
+        client.setHostnameVerificationEnabled(false);
         client.settings().setConnectTimeout(CONNECT_TIMEOUT);
         configure.accept(client.settings());
         return new ServiceConnection() {

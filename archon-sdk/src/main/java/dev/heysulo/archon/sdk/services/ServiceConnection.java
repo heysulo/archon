@@ -10,6 +10,14 @@ interface ServiceConnection {
     @FunctionalInterface
     interface Connector {
         ServiceConnection open(ServiceEndpoint endpoint, Listener listener);
+
+        /**
+         * Opens a connection to an instance of a service, knowing its definition, which says who must be serving it.
+         */
+        default ServiceConnection open(dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition definition,
+                ServiceEndpoint endpoint, Listener listener) {
+            return open(endpoint, listener);
+        }
     }
 
     /** What happens on the connection. */

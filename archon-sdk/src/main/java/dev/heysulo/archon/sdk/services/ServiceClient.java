@@ -134,11 +134,12 @@ public final class ServiceClient implements AutoCloseable {
             if (closed) {
                 throw new ServiceException("Client for service " + serviceId + " is closed");
             }
-            ServiceEndpoint endpoint = choose(lookup.apply(serviceId));
+            ServiceInfo info = lookup.apply(serviceId);
+            ServiceEndpoint endpoint = choose(info);
             Attempt attempt = new Attempt(endpoint);
             // Set before connecting, so the handshake is not mistaken for a stale connection's
             active = attempt;
-            attempt.connection = connector.open(endpoint, attempt);
+            attempt.connection = connector.open(info.definition(), endpoint, attempt);
             try {
                 attempt.connection.connect();
                 if (!attempt.handshake.await(HANDSHAKE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {

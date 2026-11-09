@@ -50,11 +50,19 @@ public class MainApplication {
                 throw new IllegalStateException("Cannot read application definitions: " + e.getMessage(), e);
             }
             LOGGER.info("{} applications are defined", ApplicationDefinitions.current().keys().size());
+            try (java.sql.Connection connection = database.get().connect()) {
+                // The portal creates join tokens here whether TLS is on yet or not
+                dev.heysulo.archon.registry.tls.JoinTokenStore.prepare(connection);
+            } catch (java.sql.SQLException e) {
+                throw new IllegalStateException("Cannot prepare the join tokens table: " + e.getMessage(), e);
+            }
             new ServiceCatalogWatcher(database.get(), ServiceRegistry.getInstance()).start();
         } else {
             LOGGER.warn("{} is not set. No services are defined, and every application may register",
                     Database.URL_ENV);
         }
+        // Before the server starts, which serves with this registry's certificate
+        dev.heysulo.archon.registry.tls.RegistryTls.fromEnvironment(database);
         RegistryServer registryServer = RegistryServer.getInstance();
         registryServer.initialize();
         LeaderElectorClient.getInstance().start(Constants.REGISTRY_LEADER_ELECTION_MAX_CONNECTION_ATTEMPTS);

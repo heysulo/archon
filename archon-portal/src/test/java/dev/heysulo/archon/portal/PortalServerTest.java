@@ -15,6 +15,9 @@ import dev.heysulo.archon.portal.services.ServiceStore;
 import dev.heysulo.archon.sdk.config.ConfigAdmin;
 import dev.heysulo.archon.sdk.config.ConfigReplica;
 import dev.heysulo.archon.sdk.config.ConfigurationException;
+import dev.heysulo.archon.dictionary.tls.TlsMode;
+import dev.heysulo.archon.portal.tls.JoinTokenStore;
+import dev.heysulo.archon.portal.tls.TlsStatus;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
@@ -79,7 +82,8 @@ public class PortalServerTest {
         server = new PortalServer(feed, snapshot -> snapshot.servedBy(identity), "/portal-test", new AuthApi(auth),
                 new ConfigApi(configs, auth::authenticate),
                 new ServicesApi(new ServiceStore(database.dataSource(), applications), feed, auth::authenticate),
-                new ApplicationsApi(applications, feed, auth::authenticate), auth::authenticate);
+                new ApplicationsApi(applications, feed, new JoinTokenStore(database.dataSource()),
+                        new TlsStatus(database.dataSource(), TlsMode.OFF), auth::authenticate), auth::authenticate);
         server.start(port);
         adminCookie = signIn("admin", ADMIN_PASSWORD);
     }
@@ -464,6 +468,46 @@ public class PortalServerTest {
         HttpResponse<String> refused = send("DELETE", "/api/applications/Shop/Search", null, adminCookie);
         Assert.assertEquals(refused.statusCode(), 409, refused.body());
         Assert.assertTrue(refused.body().contains("owns search"), refused.body());
+    }
+
+    @Test
+    public void createsListsAndRevokesJoinTokens() throws Exception {
+        HttpResponse<String> created = post("/api/applications/Shop/Search/tokens",
+                "{\"description\":\"Staging\",\"reusable\":true,\"expiresInHours\":24}", adminCookie, true);
+        Assert.assertEquals(created.statusCode(), 201, created.body());
+        Assert.assertTrue(created.body().contains("\"token\":\"ajt_"), created.body());
+        String token = created.body().replaceAll(".*\"token\":\"(ajt_[^\"]+)\".*", "$1");
+        Assert.assertTrue(created.body().contains("\"reusable\":true"), created.body());
+
+        HttpResponse<String> listed = get("/api/applications/Shop/Search/tokens", adminCookie);
+        Assert.assertTrue(listed.body().contains("\"description\":\"Staging\""), listed.body());
+        Assert.assertFalse(listed.body().contains(token), "the token itself is never listed");
+        Assert.assertFalse(listed.body().contains(dev.heysulo.archon.dictionary.tls.JoinTokens.hash(token)),
+                "nor its hash");
+
+        long id = Long.parseLong(listed.body().replaceAll("^\\[\\{\"id\":(\\d+),.*", "$1"));
+        Assert.assertEquals(send("DELETE", "/api/applications/Shop/Search/tokens/" + id, null, adminCookie)
+                .statusCode(), 204);
+        Assert.assertEquals(get("/api/applications/Shop/Search/tokens", adminCookie).body(), "[]");
+        Assert.assertEquals(send("DELETE", "/api/applications/Shop/Search/tokens/" + id, null, adminCookie)
+                .statusCode(), 404);
+    }
+
+    @Test
+    public void refusesJoinTokensForArchonAndUndefinedApplications() throws Exception {
+        Assert.assertEquals(post("/api/applications/Archon/Portal/tokens", "{}", adminCookie, true).statusCode(),
+                400);
+        Assert.assertEquals(post("/api/applications/Nowhere/Nobody/tokens", "{}", adminCookie, true).statusCode(),
+                404);
+        Assert.assertEquals(post("/api/applications/Shop/Search/tokens", "{\"expiresInHours\":0}", adminCookie,
+                true).statusCode(), 400);
+    }
+
+    @Test
+    public void reportsTlsOffWithoutACa() throws Exception {
+        HttpResponse<String> status = get("/api/tls", adminCookie);
+        Assert.assertEquals(status.statusCode(), 200, status.body());
+        Assert.assertEquals(status.body(), "{\"mode\":\"off\"}");
     }
 
     // ---------------- processes ----------------

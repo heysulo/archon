@@ -32,7 +32,11 @@ import dev.heysulo.archon.registry.messages.sync.StateSnapshotComplete;
 import dev.heysulo.archon.registry.services.ServiceRegistry;
 import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.Message;
+import dev.heysulo.archon.dictionary.sdk.messages.CertificateRequest;
+import dev.heysulo.archon.dictionary.tls.ArchonIdentity;
+import dev.heysulo.archon.registry.tls.RegistryTls;
 import dev.heysulo.databridge.core.server.BasicServer;
+import dev.heysulo.databridge.core.server.secure.SecureServer;
 import dev.heysulo.databridge.core.server.Server;
 import dev.heysulo.databridge.core.server.callback.ServerCallback;
 import io.netty.channel.EventLoopGroup;
@@ -127,6 +131,14 @@ public class RegistryServer implements ServerCallback {
     @Override
     public void onMessage(Server server, Connection connection, Message message) {
         LOGGER.debug("Received {} from {}", message.getClass().getSimpleName(), connection.getRemoteAddress());
+        // Answered by any registry: every one holds the CA, and a joining instance does not know the primary yet
+        if (message instanceof CertificateRequest request) {
+            RegistryTls.current().handle(connection, request);
+            return;
+        }
+        if (!admitted(connection, message)) {
+            return;
+        }
         if (message instanceof VoteRequest voteRequest) {
             handleVoteRequest(connection, voteRequest);
             return;
@@ -167,10 +179,54 @@ public class RegistryServer implements ServerCallback {
         }
     }
 
+    /**
+     * With TLS required, only registries take part in elections and state sync, and every other caller but one
+     * looking for the primary must have presented a certificate.
+     */
+    private static boolean admitted(Connection connection, Message message) {
+        RegistryTls tls = RegistryTls.current();
+        if (!tls.required() || message instanceof PrimaryRegistryLookupMessage) {
+            return true;
+        }
+        java.util.Optional<ArchonIdentity> peer = ArchonIdentity.of(connection);
+        boolean registryMessage = message instanceof VoteRequest || message instanceof PrimaryStanding
+                || message instanceof LeaderElectionMessage;
+        if (registryMessage && !peer.equals(java.util.Optional.of(ArchonIdentity.REGISTRY))) {
+            LOGGER.warn("Dropped {} from {}: only a registry may send it, and the caller is {}",
+                    message.getClass().getSimpleName(), connection.getRemoteAddress(),
+                    peer.map(ArchonIdentity::toString).orElse("unidentified"));
+            return false;
+        }
+        if (peer.isEmpty() && !(message instanceof ApplicationRegistrationMessage)) {
+            // Registration answers with a termination instead, so the instance says why it stopped
+            LOGGER.warn("Dropped {} from {}: TLS is required and it presented no certificate",
+                    message.getClass().getSimpleName(), connection.getRemoteAddress());
+            return false;
+        }
+        return true;
+    }
+
+    /** Why the certificate the instance connected with does not let it register as it asks, if it does not. */
+    static String certificateRefusal(Connection connection, String group, String name) {
+        java.util.Optional<ArchonIdentity> peer = ArchonIdentity.of(connection);
+        if (peer.isPresent()) {
+            return peer.get().is(group, name) ? null : ApplicationTermination.REASON_CERTIFICATE_MISMATCH;
+        }
+        return RegistryTls.current().required() ? ApplicationTermination.REASON_CERTIFICATE_REQUIRED : null;
+    }
+
     private void handleApplicationRegistrationMessage(Connection connection,
             ApplicationRegistrationMessage registrationMessage) {
         String group = registrationMessage.getGroupName();
         String name = registrationMessage.getApplicationName();
+        String certificateRefusal = certificateRefusal(connection, group, name);
+        if (certificateRefusal != null) {
+            LOGGER.warn("Refused {}:{} from {}: {} ({})", group, name, connection.getRemoteAddress(),
+                    certificateRefusal, ArchonIdentity.of(connection).map(ArchonIdentity::toString)
+                            .orElse("no certificate"));
+            askToTerminate(connection, certificateRefusal);
+            return;
+        }
         // Checked on every registration and re-registration, so a removed definition admits no one new
         if (!ApplicationDefinitions.current().isDefined(group, name)) {
             LOGGER.warn("Refused {}:{} from {}: the application is not defined", group, name,
@@ -362,7 +418,26 @@ public class RegistryServer implements ServerCallback {
 
     @Override
     public void onError(Server server, Connection connection, Throwable throwable) {
+        String refusal = tlsRefusal(throwable);
+        if (refusal != null) {
+            // Expected while TLS is required: a caller without TLS, or one the CA did not certify. Not a fault here.
+            LOGGER.warn("Refused a connection from {}: {}", connection.getRemoteAddress(), refusal);
+            return;
+        }
         LOGGER.error("Registry error", throwable);
+    }
+
+    /** Why a TLS handshake turned the caller away, or null if the error is something else. */
+    static String tlsRefusal(Throwable throwable) {
+        for (Throwable cause = throwable; cause != null; cause = cause.getCause()) {
+            if (cause instanceof io.netty.handler.ssl.NotSslRecordException) {
+                return "it did not use TLS, which is required";
+            }
+            if (cause instanceof javax.net.ssl.SSLException) {
+                return "the TLS handshake failed: " + cause.getMessage();
+            }
+        }
+        return null;
     }
 
     public void initialize() {
@@ -370,7 +445,11 @@ public class RegistryServer implements ServerCallback {
             throw new IllegalStateException("Registry server is already started");
         }
         LOGGER.info("Starting registry server on port {}", Constants.REGISTRY_PORT);
-        server = new BasicServer(Constants.REGISTRY_PORT, this, bossGroup, workerGroup);
+        RegistryTls tls = RegistryTls.current();
+        server = tls.enabled()
+                ? new SecureServer(Constants.REGISTRY_PORT, this, tls::serverContext,
+                        tls.mode() == dev.heysulo.archon.dictionary.tls.TlsMode.OPTIONAL, bossGroup, workerGroup)
+                : new BasicServer(Constants.REGISTRY_PORT, this, bossGroup, workerGroup);
         server.settings().addTrustedPackage("dev.heysulo.archon.**");
         Constants.TRUSTED_TIME_CLASSES.forEach(server.settings()::addTrustedPackage);
         server.settings().setHeartbeatInterval(Constants.REGISTRY_HEARTBEAT_INTERVAL);

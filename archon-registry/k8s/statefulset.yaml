@@ -31,6 +31,17 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: ARCHON_TLS
+          valueFrom:
+            configMapKeyRef:
+              name: archon-tls
+              key: mode
+        # Opens the Archon CA's key, sealed in the database; see tls.yaml
+        - name: ARCHON_CA_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: archon-ca
+              key: master-key
         - name: ARCHON_DB_URL
           value: "jdbc:mysql://mysql.heysulo.internal:3306/archon"
         # Created by hand, never committed:

@@ -75,7 +75,9 @@ import static dev.heysulo.archon.dictionary.sdk.RegistryProtocol.RANK_UNKNOWN;
  *
  * <p>Registries are found through {@code ARCHON_REGISTRY_LOCATIONS}. Other environment variables:
  * {@code ARCHON_BASE_PORT} (the port services are offset from), {@code ARCHON_ADVERTISED_HOST} (the address others
- * reach this instance's services at) and {@code ARCHON_NODE_NAME} (shown in the portal).
+ * reach this instance's services at) and {@code ARCHON_NODE_NAME} (shown in the portal). For TLS,
+ * {@code ARCHON_TLS}, {@code ARCHON_CA_FINGERPRINT} and {@code ARCHON_JOIN_TOKEN}; see
+ * {@link dev.heysulo.archon.sdk.tls.ArchonTls}.
  *
  * <p>Thread safety: every method may be called from any thread, except that blocking calls must not run on the
  * registry connection's network thread. Callbacks arrive one at a time, in order, on a dedicated thread.
@@ -155,10 +157,21 @@ public class ArchonInterface {
         this.reconnector = new Reconnector(() -> RegistryLookupService.getInstance().search(),
                 location -> primaryRegistry.connect(location), this::restoreRegistration,
                 () -> primaryRegistry.isConnected(), reconnectThread, PRIMARY_LOOKUP_RETRY_DELAY_MILLIS);
+        joinWithTls(groupName, applicationName);
         setupPrimaryRegistryConnection();
         registerApplication();
         startConfigs(groupName, applicationName);
         return rank;
+    }
+
+    // With TLS on, the instance needs its certificate before it can register as its application
+    private void joinWithTls(String group, String name) {
+        try {
+            dev.heysulo.archon.sdk.tls.ArchonTls.get().join(group, name);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PrimaryRegistryCommunicationFailure("TLS_JOIN", e);
+        }
     }
 
     private void setupPrimaryRegistryConnection() {

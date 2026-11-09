@@ -6,7 +6,13 @@ import dev.heysulo.archon.portal.auth.PasswordHasher;
 import dev.heysulo.archon.portal.applications.ApplicationStore;
 import dev.heysulo.archon.portal.db.PortalDatabase;
 import dev.heysulo.archon.portal.services.ServiceStore;
+import dev.heysulo.archon.dictionary.tls.ArchonIdentity;
+import dev.heysulo.archon.dictionary.tls.TlsMode;
+import dev.heysulo.archon.portal.tls.JoinTokenStore;
+import dev.heysulo.archon.portal.tls.PortalHttps;
+import dev.heysulo.archon.portal.tls.TlsStatus;
 import dev.heysulo.archon.sdk.ArchonInterface;
+import dev.heysulo.archon.sdk.tls.ArchonTls;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,15 +59,17 @@ public final class PortalApplication {
         PortalServer server = new PortalServer(registry, snapshot -> snapshot.servedBy(identity), "/portal",
                 new AuthApi(auth), new ConfigApi(configs, auth::authenticate),
                 new ServicesApi(new ServiceStore(database.dataSource(), applications), registry, auth::authenticate),
-                new ApplicationsApi(applications, registry, auth::authenticate), auth::authenticate);
+                new ApplicationsApi(applications, registry, new JoinTokenStore(database.dataSource()),
+                        new TlsStatus(database.dataSource(), TlsMode.fromEnvironment()), auth::authenticate),
+                auth::authenticate);
         // Serving first: the page reports registry trouble itself, and registering waits until a primary answers
-        server.start(port);
+        server.start(port, PortalHttps.fromEnvironment());
         registry.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             server.stop();
             database.close();
         }, "portal-shutdown"));
-        Thread registration = new Thread(() -> register(identity, configs), "portal-registration");
+        Thread registration = new Thread(() -> register(identity, configs, database), "portal-registration");
         registration.setDaemon(true);
         registration.start();
         LOGGER.info("Archon portal started on {}", identity.getHost());
@@ -89,8 +97,14 @@ public final class PortalApplication {
         }, CLEAN_UP_MINUTES, CLEAN_UP_MINUTES, TimeUnit.MINUTES);
     }
 
-    private static void register(PortalIdentity identity, PortalConfigs configs) {
+    private static void register(PortalIdentity identity, PortalConfigs configs, PortalDatabase database) {
         try {
+            try {
+                ArchonTls.configureForComponent(ArchonIdentity.PORTAL, () -> database.dataSource().getConnection());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
             ArchonInterface archon = ArchonInterface.getInstance();
             int rank = archon.initialize(PortalIdentity.GROUP, PortalIdentity.NAME, identity);
             LOGGER.info("Registered as {} / {} with rank {}", PortalIdentity.GROUP, PortalIdentity.NAME, rank);

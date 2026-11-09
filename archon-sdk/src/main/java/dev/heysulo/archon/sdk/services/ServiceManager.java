@@ -8,7 +8,9 @@ import dev.heysulo.archon.dictionary.sdk.messages.ServiceStoppedMessage;
 import dev.heysulo.archon.dictionary.sdk.services.ServiceDefinition;
 import dev.heysulo.databridge.core.common.Message;
 import dev.heysulo.databridge.core.common.ProtocolSettings;
+import dev.heysulo.archon.sdk.tls.ArchonTls;
 import dev.heysulo.databridge.core.server.BasicServer;
+import dev.heysulo.databridge.core.server.secure.SecureServer;
 import dev.heysulo.databridge.core.server.Server;
 import dev.heysulo.databridge.core.server.callback.ServerCallback;
 import org.slf4j.Logger;
@@ -54,6 +56,18 @@ public final class ServiceManager {
     }
 
     /**
+     * A plain server with TLS off. With TLS on, a TLS server using this instance's current certificate, which also
+     * accepts plain clients until TLS is required.
+     */
+    static Server newServer(int port, ServerCallback callback) {
+        ArchonTls tls = ArchonTls.get();
+        if (!tls.enabled()) {
+            return new BasicServer(port, callback);
+        }
+        return new SecureServer(port, callback, tls::serverContext, !tls.required(), null, null);
+    }
+
+    /**
      * Applications use this through {@link dev.heysulo.archon.sdk.ArchonInterface}, which creates one.
      *
      * @param group            this instance's application group
@@ -64,7 +78,7 @@ public final class ServiceManager {
      */
     public ServiceManager(String group, String application, Consumer<Message> registry,
             BooleanSupplier onRegistryThread) {
-        this(group, application, registry, ServicePorts::fromEnvironment, BasicServer::new,
+        this(group, application, registry, ServicePorts::fromEnvironment, ServiceManager::newServer,
                 AdvertisedHost::fromEnvironment, onRegistryThread);
     }
 
@@ -141,7 +155,8 @@ public final class ServiceManager {
         long requestId = requests.open();
         ServiceStartResponseMessage response;
         try {
-            send(requestId, new ServiceStartedMessage(requestId, serviceId, advertisedHost.get(), port));
+            send(requestId, new ServiceStartedMessage(requestId, serviceId, advertisedHost.get(), port)
+                    .secure(server instanceof SecureServer));
             response = requests.await(requestId, ServiceStartResponseMessage.class, RESPONSE_TIMEOUT_MILLIS);
         } catch (RuntimeException e) {
             stopQuietly(server);

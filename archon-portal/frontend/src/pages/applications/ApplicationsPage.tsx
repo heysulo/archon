@@ -1,8 +1,8 @@
 import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, Stack, Table, Text,
   TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconAlertTriangle, IconDots, IconLock, IconPencil, IconPlugConnected, IconPlus, IconSearch, IconTrash }
-  from "@tabler/icons-react";
+import { IconAlertTriangle, IconDots, IconKey, IconLock, IconPencil, IconPlugConnected, IconPlus, IconSearch,
+  IconTrash } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useProcessStream } from "../../api/processStream";
 import { useAuth } from "../../auth/AuthProvider";
@@ -11,6 +11,7 @@ import { announcements } from "../services/model";
 import { useServices } from "../services/servicesApi";
 import { ApplicationFormModal } from "./ApplicationFormModal";
 import { AssignServicesModal } from "./AssignServicesModal";
+import { JoinTokensModal } from "./JoinTokensModal";
 import { useApplicationMutations, useApplications, type ApplicationDefinition, type ApplicationInput }
   from "./applicationsApi";
 import { key, matches, runningInstances, servicesByOwner, undefinedRunning } from "./model";
@@ -31,6 +32,7 @@ export function ApplicationsPage() {
   const [editing, setEditing] = useState<ApplicationDefinition | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<ApplicationDefinition | null>(null);
   const [assigning, setAssigning] = useState<ApplicationDefinition | null>(null);
+  const [tokensOf, setTokensOf] = useState<ApplicationDefinition | null>(null);
 
   const all = useMemo(() => definitions.data ?? [], [definitions.data]);
   const running = useMemo(() => runningInstances(snapshot?.processes ?? []), [snapshot]);
@@ -196,6 +198,10 @@ export function ApplicationsPage() {
                                 )}
                                 {manage && (
                                   <>
+                                    <Menu.Item leftSection={<IconKey size={16} />}
+                                               onClick={() => setTokensOf(definition)}>
+                                      Join tokens
+                                    </Menu.Item>
                                     <Menu.Item leftSection={<IconPencil size={16} />}
                                                onClick={() => setEditing(definition)}>
                                       Edit
@@ -220,6 +226,7 @@ export function ApplicationsPage() {
         </Card>
       )}
 
+      <JoinTokensModal target={tokensOf} onClose={() => setTokensOf(null)} />
       <AssignServicesModal target={assigning} services={services.data ?? []} announced={announced}
                            onClose={() => setAssigning(null)}
                            onAssigned={(ids) => notifications.show({ color: "green", message: `Assigned ${ids.join(", ")}` })} />

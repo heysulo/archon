@@ -24,6 +24,12 @@ spec:
           value: "10.21.3.201|10.21.3.202|10.21.3.203"
         # archon-config's port offset is 0, so the primary serves on 9100. Applications find it through the
         # registry, at the pod's address, so no Kubernetes Service is needed.
+        # Joins through the database, so it needs no fingerprint or token; see archon-registry/k8s/tls.yaml
+        - name: ARCHON_TLS
+          valueFrom:
+            configMapKeyRef:
+              name: archon-tls
+              key: mode
         - name: ARCHON_BASE_PORT
           value: "9100"
         - name: ARCHON_ADVERTISED_HOST

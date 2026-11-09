@@ -87,7 +87,19 @@ final class PortalServer implements ProcessFeed.Listener {
     }
 
     void start(int port) throws IOException {
-        server = HttpServer.create(new InetSocketAddress(port), 0);
+        start(port, java.util.Optional.empty());
+    }
+
+    /** @param https serves HTTPS with this context, or plain HTTP when empty */
+    void start(int port, java.util.Optional<javax.net.ssl.SSLContext> https) throws IOException {
+        if (https.isPresent()) {
+            com.sun.net.httpserver.HttpsServer secure = com.sun.net.httpserver.HttpsServer.create(
+                    new InetSocketAddress(port), 0);
+            secure.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(https.get()));
+            server = secure;
+        } else {
+            server = HttpServer.create(new InetSocketAddress(port), 0);
+        }
         server.createContext("/api/events", this::events);
         server.createContext("/api/processes", this::processes);
         server.createContext("/api/auth/", authApi::handleAuth);
@@ -96,6 +108,7 @@ final class PortalServer implements ProcessFeed.Listener {
         server.createContext("/api/configs", configApi::handle);
         server.createContext("/api/services", servicesApi::handle);
         server.createContext("/api/applications", applicationsApi::handle);
+        server.createContext("/api/tls", applicationsApi::handleTls);
         server.createContext("/healthz", exchange -> Http.sendText(exchange, 200, "ok"));
         server.createContext("/", this::frontend);
         executor = Executors.newFixedThreadPool(THREADS);
@@ -103,7 +116,7 @@ final class PortalServer implements ProcessFeed.Listener {
         feed.subscribe(this);
         broadcaster.scheduleWithFixedDelay(this::keepAlive, KEEPALIVE_SECONDS, KEEPALIVE_SECONDS, TimeUnit.SECONDS);
         server.start();
-        LOGGER.info("Portal listening on port {}", port);
+        LOGGER.info("Portal listening on port {} over {}", port, https.isPresent() ? "HTTPS" : "HTTP");
     }
 
     void stop() {

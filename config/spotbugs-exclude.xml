@@ -31,6 +31,8 @@
             <Class name="dev.heysulo.archon.portal.auth.AuthStore"/>
             <Class name="dev.heysulo.archon.portal.services.ServiceStore"/>
             <Class name="dev.heysulo.archon.portal.applications.ApplicationStore"/>
+            <Class name="dev.heysulo.archon.portal.tls.JoinTokenStore"/>
+            <Class name="dev.heysulo.archon.portal.tls.TlsStatus"/>
         </Or>
         <Method name="&lt;init&gt;"/>
     </Match>

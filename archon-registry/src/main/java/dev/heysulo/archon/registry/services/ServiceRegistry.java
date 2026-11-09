@@ -36,7 +36,7 @@ public final class ServiceRegistry {
     // Service id to the instances running it, keyed by their application record
     private final Map<String, Map<Application, Address>> running = new ConcurrentHashMap<>();
 
-    private record Address(String host, int port) {
+    private record Address(String host, int port, boolean secure) {
     }
 
     ServiceRegistry() {
@@ -80,7 +80,7 @@ public final class ServiceRegistry {
                 ? application.getConnection().getRemoteAddress()
                 : message.getHost();
         running.computeIfAbsent(serviceId, id -> new ConcurrentHashMap<>())
-                .put(application, new Address(host, message.getPort()));
+                .put(application, new Address(host, message.getPort(), message.isSecure()));
         LOGGER.info("{} is serving {} at {}:{}", application.getDisplayName(), serviceId, host, message.getPort());
         ProcessWatchers.getInstance().changed();
         return ServiceStartResponseMessage.accepted(message.getRequestId(), serviceId);
@@ -125,7 +125,8 @@ public final class ServiceRegistry {
             Application application = live.get(i).getKey();
             boolean primary = definition.mode() == ServiceMode.PRIMARY_MIRROR && i == 0;
             Address address = live.get(i).getValue();
-            endpoints.add(new ServiceEndpoint(address.host(), address.port(), application.getRank(), primary));
+            endpoints.add(new ServiceEndpoint(address.host(), address.port(), application.getRank(), primary,
+                    address.secure()));
         }
         return endpoints;
     }

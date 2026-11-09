@@ -83,7 +83,10 @@ final class RegistryWatcher implements ClientCallback, ProcessFeed {
             return;
         }
         handshake = new CountDownLatch(1);
-        Client fresh = new Client(primary, RegistryProtocol.PORT, this, eventLoops);
+        // With TLS on, proves this component's identity and trusts only a registry; null, so plain, until joined
+        Client fresh = new Client(primary, RegistryProtocol.PORT, this,
+                dev.heysulo.archon.sdk.tls.ArchonTls.get().registryContext(), eventLoops);
+        fresh.setHostnameVerificationEnabled(false);
         fresh.settings().setConnectTimeout(CONNECT_TIMEOUT);
         fresh.settings().setHeartbeatInterval(HEARTBEAT_INTERVAL);
         try {

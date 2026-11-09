@@ -336,7 +336,10 @@ public class LeaderElectorClient implements ClientCallback {
 
     private void tryConnect(String address) {
         LOGGER.debug("Attempting to connect to {} for leader election", address);
-        Client client = new Client(address, Constants.REGISTRY_PORT, this, workerGroup);
+        Client client = new Client(address, Constants.REGISTRY_PORT, this,
+                dev.heysulo.archon.registry.tls.RegistryTls.current().peerContext(), workerGroup);
+        // Registries are trusted by the identity in their certificate, not by address
+        client.setHostnameVerificationEnabled(false);
         Constants.TRUSTED_TIME_CLASSES.forEach(client.settings()::addTrustedPackage);
         client.settings().setHeartbeatInterval(Constants.REGISTRY_HEARTBEAT_INTERVAL);
         try {

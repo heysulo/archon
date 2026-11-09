@@ -99,7 +99,10 @@ final class PrimaryScanner implements ClientCallback {
         }
         connector.execute(() -> {
             try {
-                Client client = new Client(address, Constants.REGISTRY_PORT, this, workerGroup);
+                Client client = new Client(address, Constants.REGISTRY_PORT, this,
+                        dev.heysulo.archon.registry.tls.RegistryTls.current().peerContext(), workerGroup);
+                // Registries are trusted by the identity in their certificate, not by address
+                client.setHostnameVerificationEnabled(false);
                 client.settings().addTrustedPackage("dev.heysulo.archon.**");
                 Constants.TRUSTED_TIME_CLASSES.forEach(client.settings()::addTrustedPackage);
                 client.settings().setHeartbeatInterval(Constants.REGISTRY_HEARTBEAT_INTERVAL);
