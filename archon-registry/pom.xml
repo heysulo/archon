@@ -42,6 +42,12 @@
             <version>1.0-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
+        <!-- For its log capture, so the portal can stream a registry's logs as it does an application's -->
+        <dependency>
+            <groupId>dev.heysulo.archon.sdk</groupId>
+            <artifactId>archon-sdk</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
         <!-- Issues certificates as the Archon CA -->
         <dependency>
             <groupId>org.bouncycastle</groupId>

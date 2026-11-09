@@ -18,6 +18,10 @@ final class ConsoleCapture {
     // [thread] LEVEL logger - message, as slf4j-simple writes it
     static final Pattern SIMPLE = Pattern.compile("^\\[(.+?)] (TRACE|DEBUG|INFO|WARN|ERROR) (\\S+) - (.*)$",
             Pattern.DOTALL);
+    // The first line of a stack trace, as slf4j-simple prints it after the line that logged it:
+    // java.net.SocketException: Connection reset
+    static final Pattern THROWABLE = Pattern.compile("^([A-Za-z_$][\\w$]*\\.)+[\\w$]*(Exception|Error|Throwable)"
+            + "(: .*)?$");
     private static final int MAX_LINE_BYTES = LogLine.MAX_MESSAGE * 4;
 
     private ConsoleCapture() {
@@ -41,7 +45,8 @@ final class ConsoleCapture {
             return new LogLine(time, matcher.group(2), matcher.group(3), matcher.group(1), matcher.group(4));
         }
         boolean continuation = previousLevel != null && (text.startsWith("\t") || text.startsWith(" ")
-                || text.startsWith("Caused by:") || text.startsWith("Suppressed:"));
+                || text.startsWith("Caused by:") || text.startsWith("Suppressed:")
+                || THROWABLE.matcher(text).matches());
         return new LogLine(time, continuation ? previousLevel : stream, "", "", text);
     }
 

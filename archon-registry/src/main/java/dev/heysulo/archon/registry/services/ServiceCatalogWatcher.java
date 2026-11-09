@@ -49,6 +49,8 @@ public final class ServiceCatalogWatcher {
 
     // Runs on the scheduler. An exception would cancel the schedule, so none may escape.
     void reload() {
+        // How many log lines this registry keeps follows configurations, read as often as the services
+        dev.heysulo.archon.registry.server.RegistryLogs.reloadSettings(database);
         ServiceCatalog next;
         ApplicationDefinitions definitions;
         try (Connection connection = database.connect()) {

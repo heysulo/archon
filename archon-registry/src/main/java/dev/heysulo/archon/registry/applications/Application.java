@@ -185,6 +185,12 @@ public class Application implements ConnectionCallback {
             dev.heysulo.archon.registry.server.LogRelays.getInstance().fromInstance(this, batch);
             return;
         }
+        if (message instanceof dev.heysulo.archon.dictionary.sdk.messages.LogStreamControl control
+                && RegistryServer.getRank() != RANK_PRIMARY) {
+            // From the primary, on this mirror: someone is watching its logs, or stopped
+            dev.heysulo.archon.registry.server.RegistryLogs.getInstance().toPrimary(connection, control.isStreaming());
+            return;
+        }
         if (message instanceof StateSnapshotComplete && RegistryServer.getRank() != RANK_PRIMARY) {
             RegistryReadiness.ready("holding the primary's state");
         }

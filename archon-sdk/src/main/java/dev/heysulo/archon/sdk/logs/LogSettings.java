@@ -37,6 +37,11 @@ public final class LogSettings {
     private LogSettings() {
     }
 
+    /** What is kept now, as {@code 1000 log lines at WARN or above}, or null before the settings were applied. */
+    public static synchronized String describe() {
+        return applied;
+    }
+
     /**
      * Applies the settings.
      *

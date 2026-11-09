@@ -555,6 +555,7 @@ public class RegistryServer implements ServerCallback {
     private void actAsPrimary() {
         LOGGER.info("--------------- Acting as PRIMARY ---------------");
         beganActingAsPrimary(System.nanoTime());
+        RegistryLogs.getInstance().stop();
         applicationRegistry = findRegistryInstance(RANK_PRIMARY);
         if (applicationRegistry == null) {
             applicationRegistry = applicationManager.createApplication(
@@ -659,6 +660,8 @@ public class RegistryServer implements ServerCallback {
             return;
         }
         RegistryReadiness.notReady("lost the primary; electing a new one");
+        // Lines were going to the lost primary; a new one asks again if anyone watches
+        RegistryLogs.getInstance().stop();
         failoverExecutor.execute(() -> {
             try {
                 LeaderElectorClient.getInstance().start(REGISTRY_FAILOVER_CONNECTION_ATTEMPTS);
@@ -681,6 +684,11 @@ public class RegistryServer implements ServerCallback {
                 .filter(app -> app.getRunLevel() == RunLevel.RUNNING)
                 .filter(Application::isConnected)
                 .toList();
+    }
+
+    /** Whether a record is this registry's own, as the primary keeps one for itself. */
+    public static boolean isOwnRecord(Application application) {
+        return application != null && application == applicationRegistry;
     }
 
     public static void setPrimaryConnection(Connection newPrimaryConnection) {

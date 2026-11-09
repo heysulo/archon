@@ -39,6 +39,8 @@ public class MainApplication {
     }
 
     private void start() throws InterruptedException {
+        // First, so the portal's live logs show how the registry started
+        dev.heysulo.archon.registry.server.RegistryLogs.install();
         // Loaded first: a registry that cannot read its service definitions must not join the cluster
         Optional<Database> database = Database.fromEnvironment();
         if (database.isPresent()) {
@@ -56,6 +58,7 @@ public class MainApplication {
             } catch (java.sql.SQLException e) {
                 throw new IllegalStateException("Cannot prepare the join tokens table: " + e.getMessage(), e);
             }
+            dev.heysulo.archon.registry.server.RegistryLogs.reloadSettings(database.get());
             new ServiceCatalogWatcher(database.get(), ServiceRegistry.getInstance()).start();
         } else {
             LOGGER.warn("{} is not set. No services are defined, and every application may register",

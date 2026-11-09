@@ -28,6 +28,12 @@ public class LogCaptureTest {
         Assert.assertEquals(line, new LogLine(5, "WARN", "dev.heysulo.Example", "main", "Slow start"));
         LogLine trace = ConsoleCapture.parse("\tat dev.heysulo.Example.run(Example.java:9)", "STDERR", "ERROR", 6);
         Assert.assertEquals(trace.level(), "ERROR", "a stack trace keeps the level of its line");
+        Assert.assertEquals(ConsoleCapture.parse("java.net.SocketException: Connection reset", "STDERR", "WARN", 6)
+                .level(), "WARN", "a stack trace's first line belongs to the line that logged it");
+        Assert.assertEquals(ConsoleCapture.parse("io.netty.handler.codec.DecoderException", "STDERR", "INFO", 6)
+                .level(), "INFO");
+        Assert.assertEquals(ConsoleCapture.parse("Exception in thread \"main\" java.lang.Error", "STDERR", "INFO", 6)
+                .level(), "STDERR", "an uncaught exception stands alone");
         Assert.assertEquals(ConsoleCapture.parse("Hello", "STDOUT", "ERROR", 7).level(), "STDOUT");
         Assert.assertEquals(ConsoleCapture.parse("Hello", "STDOUT", null, 7).level(), "STDOUT");
     }

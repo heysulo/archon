@@ -126,6 +126,11 @@ public final class LogRelays {
     }
 
     private static void control(Application application, boolean streaming) {
+        if (RegistryServer.isOwnRecord(application)) {
+            // This registry, as primary: it has no connection to itself
+            RegistryLogs.getInstance().local(application, streaming);
+            return;
+        }
         if (!application.isConnected()) {
             return;
         }
