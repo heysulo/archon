@@ -3,6 +3,9 @@ kind: Service
 metadata:
   name: archon-registry-0-svc
 spec:
+  # Registries and applications reach registries through these whatever their readiness: an unready registry
+  # may be mid-election, and dropping it would stall the election. Readiness only paces rollouts.
+  publishNotReadyAddresses: true
   type: LoadBalancer
   loadBalancerIP: 10.21.3.201
   selector:
@@ -17,6 +20,9 @@ kind: Service
 metadata:
   name: archon-registry-1-svc
 spec:
+  # Registries and applications reach registries through these whatever their readiness: an unready registry
+  # may be mid-election, and dropping it would stall the election. Readiness only paces rollouts.
+  publishNotReadyAddresses: true
   type: LoadBalancer
   loadBalancerIP: 10.21.3.202
   selector:
@@ -31,6 +37,9 @@ kind: Service
 metadata:
   name: archon-registry-2-svc
 spec:
+  # Registries and applications reach registries through these whatever their readiness: an unready registry
+  # may be mid-election, and dropping it would stall the election. Readiness only paces rollouts.
+  publishNotReadyAddresses: true
   type: LoadBalancer
   loadBalancerIP: 10.21.3.203
   selector:

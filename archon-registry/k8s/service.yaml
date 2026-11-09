@@ -3,6 +3,9 @@ kind: Service
 metadata:
   name: archon-registry-service
 spec:
+  # Registries and applications reach registries through these whatever their readiness: an unready registry
+  # may be mid-election, and dropping it would stall the election. Readiness only paces rollouts.
+  publishNotReadyAddresses: true
   clusterIP: None
   selector:
     app: archon-registry

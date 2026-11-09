@@ -28,6 +28,7 @@ import dev.heysulo.archon.registry.messages.leaderelection.RegistryRegistrationR
 import dev.heysulo.archon.registry.messages.leaderelection.VoteRequest;
 import dev.heysulo.archon.registry.messages.leaderelection.VoteResponse;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
+import dev.heysulo.archon.registry.messages.sync.StateSnapshotComplete;
 import dev.heysulo.archon.registry.services.ServiceRegistry;
 import dev.heysulo.databridge.core.common.Connection;
 import dev.heysulo.databridge.core.common.Message;
@@ -59,6 +60,26 @@ import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_PRIMARY_S
 import static dev.heysulo.archon.registry.constants.Constants.REGISTRY_RECONNECT_GRACE;
 
 public class RegistryServer implements ServerCallback {
+    // When this registry last became primary, or null if it never did. Records inherited then are reclaimed by
+    // their instances reconnecting during the grace period that follows.
+    private static volatile Long primarySinceNanos;
+
+    static void beganActingAsPrimary(long nanos) {
+        primarySinceNanos = nanos;
+    }
+
+    /**
+     * Whether this registry became primary so recently that instances may still be reconnecting. Until the grace
+     * period ends a leader's record without a connection is not yet a dead leader; the sweep at its end decides.
+     */
+    public static boolean inReconnectGrace() {
+        Long since = primarySinceNanos;
+        return getRank() == RANK_PRIMARY && since != null
+                && System.nanoTime() - since < REGISTRY_RECONNECT_GRACE.toNanos();
+    }
+
+    // How long a mirror waits for the primary to mark its state snapshot complete before it is ready regardless
+    static final java.time.Duration SNAPSHOT_WAIT = java.time.Duration.ofSeconds(20);
     private static Application applicationRegistry = new Application(APPLICATION_GROUP_NAME,
             APPLICATION_NAME_REGISTRY, RANK_FORECASTED_PRIMARY);
     private static RegistryServer instance;
@@ -407,13 +428,24 @@ public class RegistryServer implements ServerCallback {
             actAsPrimary();
         } else {
             LOGGER.info("--------------- Acting as MIRROR ---------------");
+            // Ready once the primary's snapshot, sent in answer to this, is complete. A primary from before the
+            // snapshot was marked complete never says so; after a while the mirror is ready anyway, as before.
+            RegistryReadiness.notReady("waiting for the primary's state");
             primaryRegistry.send(new ApplicationRankUpdate(getRank()));
+            primaryScanExecutor.schedule(() -> {
+                if (getRank() != RANK_PRIMARY && !RegistryReadiness.isReady()) {
+                    LOGGER.warn("The primary did not mark its state complete within {} s; it may run an older "
+                            + "version. Ready anyway", SNAPSHOT_WAIT.toSeconds());
+                    RegistryReadiness.ready("following the primary without a complete snapshot");
+                }
+            }, SNAPSHOT_WAIT.toMillis(), TimeUnit.MILLISECONDS);
         }
         LOGGER.info("Started as {}", applicationRegistry.getDisplayName());
     }
 
     private void actAsPrimary() {
         LOGGER.info("--------------- Acting as PRIMARY ---------------");
+        beganActingAsPrimary(System.nanoTime());
         applicationRegistry = findRegistryInstance(RANK_PRIMARY);
         if (applicationRegistry == null) {
             applicationRegistry = applicationManager.createApplication(
@@ -421,6 +453,7 @@ public class RegistryServer implements ServerCallback {
         }
         applicationRegistry.setDetails(ownDetails());
         applicationRegistry.setRunLevel(RunLevel.RUNNING);
+        RegistryReadiness.ready("acting as primary");
         retireDisconnectedMirrorRecords();
         scanForOtherPrimaries();
         primaryScanExecutor.schedule(this::retireUnclaimedRecords, REGISTRY_RECONNECT_GRACE.toMillis(),
@@ -503,6 +536,8 @@ public class RegistryServer implements ServerCallback {
     public void sendStateSnapshot(Application mirror) {
         applicationManager.findAllKnownApplications()
                 .forEach(application -> mirror.send(new ApplicationSyncMessage(application)));
+        // On the same connection, so it arrives after every record
+        mirror.send(new StateSnapshotComplete());
         LOGGER.info("Sent state snapshot to {}", mirror.getDisplayName());
     }
 
@@ -514,6 +549,7 @@ public class RegistryServer implements ServerCallback {
         if (!failoverInProgress.compareAndSet(false, true)) {
             return;
         }
+        RegistryReadiness.notReady("lost the primary; electing a new one");
         failoverExecutor.execute(() -> {
             try {
                 LeaderElectorClient.getInstance().start(REGISTRY_FAILOVER_CONNECTION_ATTEMPTS);

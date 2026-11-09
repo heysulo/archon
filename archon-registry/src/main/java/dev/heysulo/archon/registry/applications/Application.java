@@ -11,6 +11,8 @@ import dev.heysulo.archon.dictionary.sdk.services.InstanceDetails;
 import dev.heysulo.archon.registry.auth.AuthenticationManager;
 import dev.heysulo.archon.registry.constants.Constants;
 import dev.heysulo.archon.registry.messages.sync.ApplicationSyncMessage;
+import dev.heysulo.archon.registry.messages.sync.StateSnapshotComplete;
+import dev.heysulo.archon.registry.server.RegistryReadiness;
 import dev.heysulo.archon.registry.server.ProcessWatchers;
 import dev.heysulo.archon.registry.server.RegistryServer;
 import dev.heysulo.archon.registry.services.ServiceRegistry;
@@ -174,6 +176,9 @@ public class Application implements ConnectionCallback {
         if (message instanceof ApplicationSyncMessage applicationSyncMessage) {
             handleApplicationSyncMessage(applicationSyncMessage);
         }
+        if (message instanceof StateSnapshotComplete && RegistryServer.getRank() != RANK_PRIMARY) {
+            RegistryReadiness.ready("holding the primary's state");
+        }
         if (RegistryServer.getRank() == RANK_PRIMARY) {
             handleServiceMessage(message);
         }
@@ -233,6 +238,13 @@ public class Application implements ConnectionCallback {
      * no one was promoted then; the first to become ready is now.
      */
     public void electLeaderIfNoneIsLive() {
+        if (RegistryServer.inReconnectGrace()) {
+            // Just after a failover the leader may simply not have reconnected yet; promoting now would take its
+            // rank. The sweep at the end of the grace period retires it if it never comes back, and elects then.
+            LOGGER.debug("{} is ready, but instances may still be reconnecting; leaving leadership to the sweep",
+                    getDisplayName());
+            return;
+        }
         ApplicationManager.withNamespaceLock(group, name, () -> {
             ApplicationManager manager = ApplicationManager.getInstance();
             if (!manager.hasLivePrimary(group, name)) {

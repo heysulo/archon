@@ -27,6 +27,10 @@ public final class FakeConnection implements Connection {
         return message == null ? null : message.getReason();
     }
 
+    public Message lastSent() {
+        return sent.isEmpty() ? null : sent.get(sent.size() - 1);
+    }
+
     public <T extends Message> T last(Class<T> type) {
         return sent.stream().filter(type::isInstance).map(type::cast).reduce((a, b) -> b).orElse(null);
     }

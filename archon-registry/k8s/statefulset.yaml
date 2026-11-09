@@ -58,3 +58,12 @@ spec:
         ports:
         - containerPort: 8080
           name: web
+        # Ready as the primary, or as a mirror holding the primary's complete state. A rolling restart waits for
+        # each restarted registry to be ready before the next, so whichever becomes primary knows every application
+        # and accepts them when they reconnect. Not a liveness check: an election makes registries unready briefly.
+        readinessProbe:
+          exec:
+            command: ["cat", "/tmp/archon-registry-ready"]
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          failureThreshold: 1

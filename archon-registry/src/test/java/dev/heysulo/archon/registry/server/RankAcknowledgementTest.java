@@ -10,6 +10,7 @@ import org.testng.Assert;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static dev.heysulo.archon.registry.constants.Constants.RANK_PRIMARY;
@@ -77,6 +78,26 @@ public class RankAcknowledgementTest {
                 .filter(record -> record.getConnection() == mirror).findFirst().orElseThrow();
         Assert.assertEquals(promoted.getRank(), RANK_PRIMARY);
         Assert.assertEquals(promoted.getRunLevel(), RunLevel.CHANGING, "until it acknowledges being leader");
+    }
+
+    // Just after a failover the leader may not have reconnected yet: a mirror reconnecting first must not take its
+    // rank. The sweep at the end of the grace period decides.
+    @Test
+    public void electsNoOneWhileInstancesMayStillBeReconnecting() {
+        String app = uniqueAppName();
+        FakeConnection leader = new FakeConnection();
+        Registration first = register(app, leader);
+        acknowledge(app, first.rank(), first.rank(), leader);
+        FakeConnection mirror = new FakeConnection();
+        Registration second = register(app, mirror);
+        leader.drop();
+        RegistryServer.beganActingAsPrimary(System.nanoTime());
+        try {
+            acknowledge(app, second.rank(), second.rank(), mirror);
+            Assert.assertNull(mirror.last(ApplicationRankUpdate.class), "not promoted during the grace period");
+        } finally {
+            RegistryServer.beganActingAsPrimary(System.nanoTime() - Duration.ofMinutes(5).toNanos());
+        }
     }
 
     @Test
