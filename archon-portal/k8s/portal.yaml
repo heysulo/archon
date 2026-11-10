@@ -30,6 +30,16 @@ spec:
               key: mode
         - name: PORTAL_PORT
           value: "8080"
+        # Serves HTTPS with this certificate chain and PKCS#8 key. Created by hand, never committed, for example a
+        # self-signed one for the portal's address:
+        #   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out tls.key
+        #   openssl req -x509 -new -key tls.key -out tls.crt -days 365 -subj "/CN=Archon Portal" \
+        #     -addext "subjectAltName=IP:10.21.3.204" -addext "extendedKeyUsage=serverAuth"
+        #   kubectl create secret tls archon-portal-tls --cert=tls.crt --key=tls.key
+        - name: PORTAL_TLS_CERT
+          value: "/etc/portal-tls/tls.crt"
+        - name: PORTAL_TLS_KEY
+          value: "/etc/portal-tls/tls.key"
         # Users and sessions live in the archon schema, through the same login as the registry
         - name: ARCHON_DB_URL
           value: "jdbc:mysql://mysql.heysulo.internal:3306/archon"
@@ -54,22 +64,34 @@ spec:
               fieldPath: spec.nodeName
         ports:
         - containerPort: 8080
-          name: http
-        # Healthy whenever the portal serves, even while the registries fail over
+          name: https
+        # Healthy whenever the portal serves, even while the registries fail over. The kubelet does not check the
+        # certificate, so a self-signed one is fine here.
         readinessProbe:
           httpGet:
             path: /healthz
-            port: http
+            port: https
+            scheme: HTTPS
           periodSeconds: 5
         livenessProbe:
           httpGet:
             path: /healthz
-            port: http
+            port: https
+            scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 10
+        # The certificate and key from the archon-portal-tls Secret. Kubernetes updates the files in place when the
+        # Secret changes, and the portal picks a renewed certificate up within a minute.
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/portal-tls
+          readOnly: true
+      volumes:
+      - name: tls
+        secret:
+          secretName: archon-portal-tls
 ---
-# Reachable by anyone who can reach 10.21.3.204; every page with data needs a portal sign-in.
-# Served over plain HTTP: put TLS in front before using it beyond a trusted network.
+# Reachable by anyone who can reach https://10.21.3.204; every page with data needs a portal sign-in.
 apiVersion: v1
 kind: Service
 metadata:
@@ -80,7 +102,7 @@ spec:
   selector:
     app: archon-portal
   ports:
-  - name: http
+  - name: https
     protocol: TCP
-    port: 80
-    targetPort: http
+    port: 443
+    targetPort: https

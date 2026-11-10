@@ -73,7 +73,7 @@ time out through the proxy; retry). MySQL at `mysql.heysulo.internal:3306`, sche
 |---|---|---|
 | Registries | StatefulSet `archon-registry` (3), Services `archon-registry-{0,1,2}-svc` | 10.21.3.201–203:8080 |
 | archon-config | Deployment `archon-config` (2) | pod IPs, port 9100 |
-| Portal | Deployment `archon-portal` (2) | http://10.21.3.204 |
+| Portal | Deployment `archon-portal` (2) | https://10.21.3.204 (self-signed certificate, Secret `archon-portal-tls`) |
 | Example app | Deployment `hello-world-java` (5) | pod IPs, ping on 9001 |
 
 ```bash
@@ -94,7 +94,8 @@ cd ../lunar-perihelion && mvn -q clean package && docker build -q --platform lin
 * After a rollout, check `kubectl get pods` for restarts and read the logs of anything that restarted
   (`kubectl logs <pod> --previous`). An app restarting during a registry rollout is a bug.
 * TLS is **required** on the cluster. ConfigMap `archon-tls` (`mode`, `ca-fingerprint`); Secrets `archon-db`,
-  `archon-ca` (`master-key`), `hello-world-java-join` (`token`). Never print, create or change secrets yourself; ask the
+  `archon-ca` (`master-key`), `hello-world-java-join` (`token`), `archon-portal-tls` (the portal's HTTPS
+  certificate and key). Never print, create or change secrets yourself; ask the
   user. CA fingerprint: `a3e075c258f5082bc10dcc385aed6ca26a613d43e3d114788d6b2e525f9f12a2`.
 * Verify features live: the portal in the built-in browser (the user is usually signed in; never enter credentials),
   `kubectl logs`, and the local smoke program pattern (compile a tiny SDK client against the example jar).
