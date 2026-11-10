@@ -21,6 +21,7 @@ describe("ProcessDetails", () => {
     expect(screen.getByText("hello-world-java-4vsbc")).toBeInTheDocument();
     expect(screen.getByText("1 h 5 min")).toBeInTheDocument();
     expect(screen.getByText("100 MB of 256 MB")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Configurations" }));
     expect(await screen.findByText("250")).toBeInTheDocument();
     expect(screen.getByText("Global: 500")).toBeInTheDocument();
     expect(screen.getByText("archon.logs.memoryLines")).toBeInTheDocument();
@@ -28,7 +29,7 @@ describe("ProcessDetails", () => {
 
   it("overrides a global configuration for the application alone", async () => {
     const calls = mockPortal({ [ROUTE]: { body: EFFECTIVE }, "POST /api/configs": { status: 201, body: {} } });
-    renderWith(<ProcessDetails process={LEADER} onClose={() => {}} />);
+    renderWith(<ProcessDetails process={LEADER} initialTab="configs" onClose={() => {}} />);
     fireEvent.click(await screen.findByLabelText("Actions for archon.logs.memoryLines"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Override for Application" }));
     expect(await screen.findByText(/Only Group:Application sees this value/)).toBeInTheDocument();
@@ -41,12 +42,25 @@ describe("ProcessDetails", () => {
 
   it("removes an override, going back to the value below", async () => {
     const calls = mockPortal({ [ROUTE]: { body: EFFECTIVE }, "DELETE /api/configs/3": { status: 204 } });
-    renderWith(<ProcessDetails process={LEADER} onClose={() => {}} />);
+    renderWith(<ProcessDetails process={LEADER} initialTab="configs" onClose={() => {}} />);
     fireEvent.click(await screen.findByLabelText("Actions for ping.intervalMillis"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Remove override" }));
     expect(await screen.findByText(/goes back to the global value, 500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove override" }));
     await waitFor(() => expect(calls.some((call) => call.method === "DELETE")).toBe(true));
+  });
+
+  it("streams the instance's logs only while the logs tab is open", () => {
+    mockPortal({ [ROUTE]: { body: EFFECTIVE } });
+    const urls: string[] = [];
+    const logSource = (url: string) => {
+      urls.push(url);
+      return { addEventListener: () => {}, close: () => {} } as unknown as EventSource;
+    };
+    renderWith(<ProcessDetails process={LEADER} onClose={() => {}} logSource={logSource} />);
+    expect(urls).toEqual([]);
+    fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+    expect(urls).toEqual(["/api/processes/Group/Application/1/logs"]);
   });
 
   it("hides configurations from those who cannot see them", () => {

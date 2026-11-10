@@ -19,7 +19,7 @@ export function LiveStatus() {
       : (error ?? look.label);
   return (
     <Tooltip label={tip} withArrow>
-      <Badge variant="dot" color={look.color} size="lg" radius="sm">
+      <Badge variant="dot" color={look.color} size="lg" style={{ flexShrink: 0 }}>
         {look.label}
       </Badge>
     </Tooltip>

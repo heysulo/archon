@@ -9,7 +9,7 @@ import { RouterProvider } from "react-router";
 import { ApiError } from "./api/http";
 import { AuthProvider } from "./auth/AuthProvider";
 import { router } from "./router";
-import { theme } from "./theme";
+import { cssVariables, theme } from "./theme";
 
 // Request/response data, such as users. Refusals (4xx) are answers, not failures, so they are not retried.
 const queryClient = new QueryClient({
@@ -28,7 +28,7 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <MantineProvider theme={theme} defaultColorScheme="auto">
+    <MantineProvider theme={theme} cssVariablesResolver={cssVariables} defaultColorScheme="auto">
       <Notifications position="top-right" />
       <QueryClientProvider client={queryClient}>
         <AuthProvider>

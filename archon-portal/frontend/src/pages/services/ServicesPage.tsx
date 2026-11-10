@@ -1,7 +1,8 @@
-import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, Stack, Table, Text,
-  TextInput, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Alert, Anchor, Badge, Button, Center, Code, Group, Loader, Menu, Modal, Stack, Table, Text,
+  TextInput, Tooltip } from "@mantine/core";
+import { Link } from "react-router";
 import { notifications } from "@mantine/notifications";
-import { IconAlertTriangle, IconDots, IconLock, IconPencil, IconPlayerPlay, IconPlus, IconSearch, IconTrash }
+import { IconAlertTriangle, IconDots, IconLock, IconPencil, IconPlayerPlay, IconPlugConnected, IconPlus, IconSearch, IconTrash }
   from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useProcessStream } from "../../api/processStream";
@@ -12,6 +13,10 @@ import { announcements, instancesByService, matches, MODE_LABELS, takenOffsets, 
 import { useApplications } from "../applications/applicationsApi";
 import { ServiceFormModal } from "./ServiceFormModal";
 import { useServiceMutations, useServices, type Service, type ServiceInput } from "./servicesApi";
+import { PageHeader } from "../../ui/PageHeader";
+import { TableCard } from "../../ui/TableCard";
+import { EmptyState } from "../../ui/EmptyState";
+import { TableCount } from "../../ui/TableCount";
 
 function Instances({ instances }: { instances: ServiceInstance[] | undefined }) {
   if (!instances?.length) {
@@ -27,7 +32,7 @@ function Instances({ instances }: { instances: ServiceInstance[] | undefined }) 
         <Tooltip key={`${instance.rank}-${instance.host}-${instance.port}`}
                  label={`${instance.hostName ?? instance.host}, ${instance.serving ? "serving" : "standing by"}`}>
           <Badge variant={instance.serving ? "light" : "outline"} color={instance.serving ? "green" : "gray"}
-                 radius="sm" tt="none" ff="monospace">
+                 tt="none" ff="monospace">
             #{instance.rank} {instance.host}:{instance.port}
           </Badge>
         </Tooltip>
@@ -83,20 +88,12 @@ export function ServicesPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>Services</Title>
-          <Text size="sm" c="dimmed">
-            What applications can serve and look up. Registries pick up changes within 10 seconds. A running service
-            cannot be changed or deleted; stop it first.
-          </Text>
-        </div>
-        {manage && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
-            Add service
-          </Button>
-        )}
-      </Group>
+      <PageHeader title="Services" description="What applications can serve and look up. Registries pick up changes within 10 seconds."
+                  action={manage && (
+                    <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
+                      Add service
+                    </Button>
+                  )} />
 
       <TextInput
         placeholder="Search by id, name, owner or mode"
@@ -122,13 +119,16 @@ export function ServicesPage() {
           <Loader />
         </Center>
       ) : shown.length === 0 ? (
-        <Center py="xl">
-          <Text c="dimmed">{query ? "No services match" : "No services yet"}</Text>
-        </Center>
+        query ? (
+          <EmptyState icon={IconSearch} title="No services match"
+                      action={<Button variant="subtle" size="xs" onClick={() => setQuery("")}>Clear search</Button>} />
+        ) : (
+          <EmptyState icon={IconPlugConnected} title="No services yet"
+                      hint="A service is what an application serves and others look up through the registry." />
+        )
       ) : (
-        <Card withBorder padding={0} radius="md">
-          <div style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="sm" highlightOnHover miw={920}>
+        <TableCard footer={<TableCount shown={shown.length} total={all.length} one="service" many="services" />}>
+            <Table miw={920}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Service</Table.Th>
@@ -158,10 +158,18 @@ export function ServicesPage() {
                       </Text>
                     </Table.Td>
                     <Table.Td style={{ whiteSpace: "nowrap" }}>
-                      {service.group} / {service.application}
+                      {seesProcesses ? (
+                        <Tooltip label="Show its instances in Processes">
+                          <Anchor component={Link} size="sm" c="inherit" underline="hover"
+                                  to={`/processes?${new URLSearchParams({ application: `${service.group}:${
+                                    service.application}` })}`}>
+                            {service.group} / {service.application}
+                          </Anchor>
+                        </Tooltip>
+                      ) : `${service.group} / ${service.application}`}
                     </Table.Td>
                     <Table.Td>
-                      <Badge variant="light" color={service.mode === "LOAD_BALANCE" ? "grape" : "indigo"} radius="sm">
+                      <Badge color={service.mode === "LOAD_BALANCE" ? "grape" : "indigo"}>
                         {MODE_LABELS[service.mode]}
                       </Badge>
                     </Table.Td>
@@ -204,8 +212,7 @@ export function ServicesPage() {
                 ))}
               </Table.Tbody>
             </Table>
-          </div>
-        </Card>
+        </TableCard>
       )}
 
       <ServiceFormModal opened={editing !== undefined} service={editing ?? null} taken={taken}

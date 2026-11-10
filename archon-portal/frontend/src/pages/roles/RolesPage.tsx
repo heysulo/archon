@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Menu, Modal, Stack, Table, Text, Title,
+import { ActionIcon, Alert, Badge, Button, Center, Group, Loader, Menu, Modal, Stack, Table, Text,
   Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconDots, IconLock, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
@@ -9,24 +9,28 @@ import { useRoles, type PermissionInfo, type Role } from "../users/usersApi";
 import { summarize } from "./model";
 import { RoleFormModal } from "./RoleFormModal";
 import { useRoleMutations, type RoleInput } from "./rolesApi";
+import { PageHeader } from "../../ui/PageHeader";
+import { TableCard } from "../../ui/TableCard";
+import { TableCount } from "../../ui/TableCount";
 
-// One line per feature, so a role stays compact however many features there are
+// One chip per feature, so a role stays one or two lines however many features there are
 function Permissions({ role, permissions }: { role: Role; permissions: PermissionInfo[] }) {
   if (role.permissions.includes(ALL_PERMISSIONS)) {
     return (
-      <Badge variant="light" color="red" radius="sm" tt="none">
+      <Badge color="red" tt="none">
         Every permission
       </Badge>
     );
   }
   return (
-    <Stack gap={2}>
+    <Group gap={6}>
       {summarize(role.permissions, permissions).map((line) => (
-        <Text key={line} size="sm">
+        // Changing something stands out from only looking at it
+        <Badge key={line} variant={line.endsWith("View") ? "default" : "light"} fw={500}>
           {line}
-        </Text>
+        </Badge>
       ))}
-    </Stack>
+    </Group>
   );
 }
 
@@ -63,20 +67,12 @@ export function RolesPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>Roles</Title>
-          <Text size="sm" c="dimmed">
-            Each role grants permissions; users get every permission of every role they hold. You can grant only
-            permissions you hold yourself.
-          </Text>
-        </div>
-        {manage && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
-            Add role
-          </Button>
-        )}
-      </Group>
+      <PageHeader title="Roles" description="Each role grants permissions; users get every permission of every role they hold. You can grant only permissions you hold yourself."
+                  action={manage && (
+                    <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
+                      Add role
+                    </Button>
+                  )} />
 
       {roles.isError && (
         <Alert color="red" variant="light">
@@ -89,9 +85,9 @@ export function RolesPage() {
           <Loader />
         </Center>
       ) : (
-        <Card withBorder padding={0} radius="md">
-          <div style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="sm" highlightOnHover miw={760}>
+        <TableCard footer={<TableCount shown={roles.data?.roles.length ?? 0} total={roles.data?.roles.length ?? 0}
+                                       one="role" many="roles" />}>
+            <Table miw={760}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Role</Table.Th>
@@ -158,8 +154,7 @@ export function RolesPage() {
                 ))}
               </Table.Tbody>
             </Table>
-          </div>
-        </Card>
+        </TableCard>
       )}
 
       <RoleFormModal opened={editing !== undefined} role={editing ?? null} permissions={roles.data?.permissions ?? []}

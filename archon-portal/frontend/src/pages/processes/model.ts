@@ -1,5 +1,5 @@
 import { parseServed } from "../services/model";
-import { resourceValue } from "./resources";
+import { cpuPercent, memoryLimit, memoryUsed, resourceValue, share } from "./resources";
 import type { ProcessInfo } from "../../api/types";
 
 /** Archon's own components, the registries and portals, rank as one primary and any number of mirrors. */
@@ -46,7 +46,41 @@ export function matches(process: ProcessInfo, query: string): boolean {
 
 export const applicationOf = (process: ProcessInfo) => `${process.group}:${process.name}`;
 
-export type LinkFilter = "any" | "connected" | "disconnected";
+/** Something about a running instance that wants a look. */
+export type Issue = "disconnected" | "notReady" | "unencrypted" | "nearLimit";
+
+export const ISSUES: readonly Issue[] = ["disconnected", "notReady", "unencrypted", "nearLimit"];
+
+/** The share of its CPUs or memory from which an instance counts as near its limit. */
+export const NEAR_LIMIT_PERCENT = 90;
+
+/** What is wrong with an instance, if anything. A stopped one has no issues: it is not expected to work. */
+export function issuesOf(process: ProcessInfo): Issue[] {
+  if (!process.running) return [];
+  const issues: Issue[] = [];
+  if (!process.connected) issues.push("disconnected");
+  if (process.runLevel !== "RUNNING") issues.push("notReady");
+  if (process.services.some((service) => !isSecure(process, service))) issues.push("unencrypted");
+  const cpu = cpuPercent(process.metrics) ?? 0;
+  const memory = share(memoryUsed(process.metrics), memoryLimit(process.metrics)) ?? 0;
+  if (Math.max(cpu, memory) >= NEAR_LIMIT_PERCENT) issues.push("nearLimit");
+  return issues;
+}
+
+/** How many instances have each issue. */
+export function countIssues(processes: ProcessInfo[]): Record<Issue, number> {
+  const counts: Record<Issue, number> = { disconnected: 0, notReady: 0, unencrypted: 0, nearLimit: 0 };
+  for (const process of processes) {
+    for (const issue of issuesOf(process)) counts[issue]++;
+  }
+  return counts;
+}
+
+/** A run level as a word: RUNNING is Running, SHUTTING_DOWN is Shutting down. */
+export function stateLabel(runLevel: string): string {
+  const words = runLevel.replace(/_/g, " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 export interface ProcessFilters {
   query: string;
@@ -55,7 +89,8 @@ export interface ProcessFilters {
   applications: string[];
   /** Run levels to show; empty shows all. */
   states: string[];
-  link: LinkFilter;
+  /** Shows only instances with this issue; null shows all. */
+  issue: Issue | null;
 }
 
 export function filterProcesses(processes: ProcessInfo[], filters: ProcessFilters): ProcessInfo[] {
@@ -63,7 +98,7 @@ export function filterProcesses(processes: ProcessInfo[], filters: ProcessFilter
     (filters.showStopped || process.running)
     && (filters.applications.length === 0 || filters.applications.includes(applicationOf(process)))
     && (filters.states.length === 0 || filters.states.includes(process.runLevel))
-    && (filters.link === "any" || process.connected === (filters.link === "connected"))
+    && (filters.issue === null || issuesOf(process).includes(filters.issue))
     && matches(process, filters.query));
 }
 
@@ -124,6 +159,27 @@ function compareBy(column: SortColumn, a: ProcessInfo, b: ProcessInfo, descendin
 export function sortProcesses(processes: ProcessInfo[], { column, descending }: Sort): ProcessInfo[] {
   const sign = descending ? -1 : 1;
   return [...processes].sort((a, b) => sign * compareBy(column, a, b, descending) || defaultOrder(a, b));
+}
+
+export interface ApplicationGroup {
+  /** `Group:Name`. */
+  application: string;
+  processes: ProcessInfo[];
+}
+
+/**
+ * The processes under their applications. Applications keep the default order, so they do not jump about when a
+ * column is sorted; the sort orders the instances inside each.
+ */
+export function groupByApplication(processes: ProcessInfo[], sort: Sort): ApplicationGroup[] {
+  const groups = new Map<string, ProcessInfo[]>();
+  for (const process of sortProcesses(processes, DEFAULT_SORT)) {
+    groups.set(applicationOf(process), []);
+  }
+  for (const process of sortProcesses(processes, sort)) {
+    groups.get(applicationOf(process))!.push(process);
+  }
+  return [...groups].map(([application, members]) => ({ application, processes: members }));
 }
 
 export interface Summary {

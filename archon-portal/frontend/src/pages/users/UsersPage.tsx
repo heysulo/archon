@@ -1,17 +1,18 @@
-import { ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Menu, Modal, Stack, Table, Text, Title }
+import { ActionIcon, Alert, Badge, Button, Center, Group, Loader, Menu, Modal, Stack, Table, Text, TextInput }
   from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconDots, IconKey, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconDots, IconKey, IconPencil, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
 import { ResetPasswordModal } from "./ResetPasswordModal";
 import { UserFormModal, type UserFormValues } from "./UserFormModal";
 import { useRoles, useUserMutations, useUsers, type User } from "./usersApi";
-
-function when(timestamp: string | undefined): string {
-  return timestamp ? new Date(timestamp).toLocaleString() : "Never";
-}
+import { PageHeader } from "../../ui/PageHeader";
+import { TableCard } from "../../ui/TableCard";
+import { When } from "../../ui/When";
+import { EmptyState } from "../../ui/EmptyState";
+import { TableCount } from "../../ui/TableCount";
 
 export function UsersPage() {
   const { user: me, can } = useAuth();
@@ -19,6 +20,11 @@ export function UsersPage() {
   const users = useUsers();
   // Only for assigning roles, so only fetched by those who can
   const roles = useRoles(manage);
+  const [query, setQuery] = useState("");
+  const all = users.data ?? [];
+  const needle = query.trim().toLowerCase();
+  const shown = all.filter((user) => !needle
+    || [user.username, user.displayName, ...user.roles].some((value) => value.toLowerCase().includes(needle)));
   const { create, update, resetPassword, remove } = useUserMutations();
   // undefined: closed; null: adding a user; a user: editing them
   const [editing, setEditing] = useState<User | null | undefined>(undefined);
@@ -56,19 +62,20 @@ export function UsersPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>Users</Title>
-          <Text size="sm" c="dimmed">
-            Who can sign in to the portal, and with which roles
-          </Text>
-        </div>
-        {manage && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
-            Add user
-        </Button>
-        )}
-      </Group>
+      <PageHeader title="Users" description="Who can sign in to the portal, and with which roles"
+                  action={manage && (
+                    <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
+                      Add user
+                    </Button>
+                  )} />
+
+      <TextInput
+        placeholder="Search by username, name or role"
+        leftSection={<IconSearch size={16} />}
+        value={query}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        aria-label="Search users"
+      />
 
       {users.isError && (
         <Alert color="red" variant="light">
@@ -80,10 +87,12 @@ export function UsersPage() {
         <Center py="xl">
           <Loader />
         </Center>
+      ) : shown.length === 0 ? (
+        <EmptyState icon={IconSearch} title="No users match"
+                    action={<Button variant="subtle" size="xs" onClick={() => setQuery("")}>Clear search</Button>} />
       ) : (
-        <Card withBorder padding={0} radius="md">
-          <div style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="sm" highlightOnHover miw={760} style={{ whiteSpace: "nowrap" }}>
+        <TableCard footer={<TableCount shown={shown.length} total={all.length} one="user" many="users" />}>
+            <Table miw={760} style={{ whiteSpace: "nowrap" }}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Username</Table.Th>
@@ -96,7 +105,7 @@ export function UsersPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {(users.data ?? []).map((user) => {
+                {shown.map((user) => {
                   const isSelf = user.id === me?.id;
                   return (
                     <Table.Tr key={user.id}>
@@ -116,22 +125,22 @@ export function UsersPage() {
                       <Table.Td>
                         <Group gap={4}>
                           {user.roles.map((role) => (
-                            <Badge key={role} variant="outline" radius="sm">
+                            <Badge key={role} variant="outline">
                               {role}
                             </Badge>
                           ))}
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Badge variant="light" color={user.enabled ? "green" : "gray"} radius="sm">
+                        <Badge color={user.enabled ? "green" : "gray"}>
                           {user.enabled ? "Enabled" : "Disabled"}
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{when(user.lastLoginAt)}</Text>
+                        <When value={user.lastLoginAt} never="Never" />
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{when(user.createdAt)}</Text>
+                        <When value={user.createdAt} />
                       </Table.Td>
                       <Table.Td>
                         {manage && (
@@ -165,8 +174,7 @@ export function UsersPage() {
                 })}
               </Table.Tbody>
             </Table>
-          </div>
-        </Card>
+        </TableCard>
       )}
 
       <UserFormModal

@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router";
 import { fireEvent, screen } from "@testing-library/react";
 import { ProcessStreamContext, type ProcessStreamState } from "../../api/processStream";
 import { mockPortal, renderWith } from "../../test/render";
@@ -30,7 +31,7 @@ const STREAM: ProcessStreamState = {
 function renderPage(options?: Parameters<typeof renderWith>[1]) {
   return renderWith(
     <ProcessStreamContext.Provider value={STREAM}>
-      <ServicesPage />
+      <MemoryRouter><ServicesPage /></MemoryRouter>
     </ProcessStreamContext.Provider>,
     options,
   );

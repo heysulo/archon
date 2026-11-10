@@ -1,8 +1,9 @@
-import { Alert, Avatar, Button, Group, Menu, Modal, PasswordInput, Stack, Text, UnstyledButton } from "@mantine/core";
+import { Alert, Avatar, Button, Group, Menu, Modal, PasswordInput, Stack, Text, UnstyledButton, useComputedColorScheme,
+  useMantineColorScheme } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconKey, IconLogout } from "@tabler/icons-react";
+import { IconKey, IconLogout, IconMoon, IconSun } from "@tabler/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../api/http";
@@ -74,11 +75,13 @@ function ChangePasswordModal({ opened, onClose }: { opened: boolean; onClose: ()
   );
 }
 
-/** Who is signed in, with changing the password and signing out. */
+/** Who is signed in, with the colour scheme, changing the password and signing out. */
 export function AccountMenu() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [passwordOpened, password] = useDisclosure(false);
+  const { setColorScheme } = useMantineColorScheme();
+  const dark = useComputedColorScheme("light", { getInitialValueInEffect: true }) === "dark";
   if (!user) return null;
   const signOut = async () => {
     try {
@@ -93,7 +96,7 @@ export function AccountMenu() {
         <Menu.Target>
           <UnstyledButton aria-label="Account">
             <Group gap={8} wrap="nowrap">
-              <Avatar size={30} radius="xl" color="indigo">
+              <Avatar size={32} radius="xl" color="indigo">
                 {initials(user.displayName || user.username)}
               </Avatar>
               <Text size="sm" visibleFrom="sm">
@@ -104,6 +107,10 @@ export function AccountMenu() {
         </Menu.Target>
         <Menu.Dropdown>
           <Menu.Label>Signed in as {user.username}</Menu.Label>
+          <Menu.Item leftSection={dark ? <IconSun size={16} /> : <IconMoon size={16} />}
+                     onClick={() => setColorScheme(dark ? "light" : "dark")}>
+            {dark ? "Switch to light mode" : "Switch to dark mode"}
+          </Menu.Item>
           <Menu.Item leftSection={<IconKey size={16} />} onClick={password.open}>
             Change password
           </Menu.Item>

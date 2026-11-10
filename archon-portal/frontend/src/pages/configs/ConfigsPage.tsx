@@ -1,14 +1,18 @@
-import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, Pagination,
-  SegmentedControl, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Button, Center, Code, Group, Loader, Menu, Modal, Pagination,
+  SegmentedControl, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconDots, IconLock, IconPencil, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconDots, IconLock, IconPencil, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { PERMISSIONS } from "../../auth/permissions";
 import { ConfigFormModal } from "./ConfigFormModal";
 import { useConfigMutations, useConfigs, type Config, type ConfigInput, type ConfigLevel } from "./configsApi";
-import { LEVEL_COLORS, LEVEL_LABELS, scopeOf } from "./model";
+import { LEVEL_COLORS, LEVEL_LABELS, scopeOf, TYPE_LABELS } from "./model";
+import { PageHeader } from "../../ui/PageHeader";
+import { TableCard } from "../../ui/TableCard";
+import { When } from "../../ui/When";
+import { EmptyState } from "../../ui/EmptyState";
 
 const PAGE_SIZE = 50;
 // Long enough to wait for the next keystroke, short enough to feel immediate
@@ -61,19 +65,12 @@ export function ConfigsPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>Configurations</Title>
-          <Text size="sm" c="dimmed">
-            Served to applications through the SDK. The most specific level wins: application, group, then global.
-          </Text>
-        </div>
-        {manage && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
-            Add configuration
-          </Button>
-        )}
-      </Group>
+      <PageHeader title="Configurations" description="Served to applications through the SDK. The most specific level wins: application, group, then global."
+                  action={manage && (
+                    <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
+                      Add configuration
+                    </Button>
+                  )} />
 
       <Group>
         <TextInput
@@ -111,13 +108,24 @@ export function ConfigsPage() {
           <Loader />
         </Center>
       ) : shown.length === 0 ? (
-        <Center py="xl">
-          <Text c="dimmed">{debouncedQuery || level !== "ALL" ? "No configurations match" : "No configurations yet"}</Text>
-        </Center>
+        debouncedQuery || level !== "ALL" ? (
+          <EmptyState icon={IconSearch} title="No configurations match"
+                      action={(
+                        <Button variant="subtle" size="xs" onClick={() => {
+                          setQuery("");
+                          setLevel("ALL");
+                          setPage(1);
+                        }}>
+                          Clear filters
+                        </Button>
+                      )} />
+        ) : (
+          <EmptyState icon={IconAdjustments} title="No configurations yet"
+                      hint="A configuration is a named value applications read through the SDK." />
+        )
       ) : (
-        <Card withBorder padding={0} radius="md">
-          <div style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="sm" highlightOnHover miw={900}>
+        <TableCard>
+            <Table miw={900}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Level</Table.Th>
@@ -133,7 +141,7 @@ export function ConfigsPage() {
                 {shown.map((config) => (
                   <Table.Tr key={config.id}>
                     <Table.Td>
-                      <Badge variant="light" color={LEVEL_COLORS[config.level]} radius="sm">
+                      <Badge color={LEVEL_COLORS[config.level]}>
                         {LEVEL_LABELS[config.level]}
                       </Badge>
                     </Table.Td>
@@ -156,15 +164,15 @@ export function ConfigsPage() {
                       )}
                     </Table.Td>
                     <Table.Td>
-                      <Text size="xs" c="dimmed">
-                        {config.type}
+                      <Text size="sm" c="dimmed">
+                        {TYPE_LABELS[config.type]}
                       </Text>
                     </Table.Td>
-                    <Table.Td maw={320}>
+                    <Table.Td maw={320} miw={120}>
                       <Code style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{config.value}</Code>
                     </Table.Td>
                     <Table.Td style={{ whiteSpace: "nowrap" }}>
-                      <Text size="sm">{config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "–"}</Text>
+                      <When value={config.updatedAt} />
                       <Text size="xs" c="dimmed">
                         {config.updatedBy}
                       </Text>
@@ -193,8 +201,7 @@ export function ConfigsPage() {
                 ))}
               </Table.Tbody>
             </Table>
-          </div>
-        </Card>
+        </TableCard>
       )}
 
       {total > 0 && (

@@ -1,7 +1,7 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWith } from "../../../test/render";
 import { snapshot } from "../../../test/fixtures";
-import { LogViewer, logsUrl } from "./LogViewer";
+import { LogPanel, logsUrl } from "./LogPanel";
 
 class FakeSource extends EventTarget {
   closed = false;
@@ -22,7 +22,7 @@ const line = (time: number, message: string, level = "INFO") =>
 function open() {
   const source = new FakeSource();
   const urls: string[] = [];
-  const view = renderWith(<LogViewer process={LEADER} onClose={() => {}} source={(url) => {
+  const view = renderWith(<LogPanel process={LEADER} source={(url) => {
     urls.push(url);
     return source as unknown as EventSource;
   }} />);
@@ -30,7 +30,7 @@ function open() {
   return { source, urls, view };
 }
 
-describe("LogViewer", () => {
+describe("LogPanel", () => {
   it("streams an instance's lines", async () => {
     const { source, urls } = open();
     expect(urls).toEqual(["/api/processes/Group/Application/1/logs"]);

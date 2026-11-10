@@ -21,6 +21,14 @@ export const LEVEL_LABELS: Record<ConfigLevel, string> = {
   APPLICATION: "Application",
 };
 
+/** Each type as people say it, wherever a configuration's type shows. */
+export const TYPE_LABELS: Record<ConfigType, string> = {
+  STRING: "Text",
+  INTEGER: "Whole number",
+  DECIMAL: "Decimal",
+  BOOLEAN: "True or false",
+};
+
 /** Checks a value against its type as archon-config will, so mistakes show before saving. */
 export function valueError(type: ConfigType, value: string): string | null {
   const trimmed = value.trim();

@@ -6,7 +6,7 @@ import { useState } from "react";
 // Only the typed text is monospace, not the label above it
 const MONOSPACE = { input: { fontFamily: "var(--mantine-font-family-monospace)" } };
 import type { Config, ConfigInput, ConfigLevel, ConfigType } from "./configsApi";
-import { identifierError, LEVEL_LABELS, valueError } from "./model";
+import { identifierError, LEVEL_LABELS, TYPE_LABELS, valueError } from "./model";
 
 interface Props {
   opened: boolean;
@@ -123,7 +123,7 @@ function ConfigForm({ config, preset, nameEditable, notice, onClose, onSubmit }:
                    data-autofocus={nameOpen || undefined} {...form.getInputProps("name")} />
         <Select
           label="Type"
-          data={["STRING", "INTEGER", "DECIMAL", "BOOLEAN"]}
+          data={(Object.keys(TYPE_LABELS) as ConfigType[]).map((value) => ({ value, label: TYPE_LABELS[value] }))}
           allowDeselect={false}
           {...form.getInputProps("type")}
           onChange={(next) => {

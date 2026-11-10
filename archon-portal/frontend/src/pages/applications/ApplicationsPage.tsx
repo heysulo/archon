@@ -1,7 +1,8 @@
-import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Group, Loader, Menu, Modal, Stack, Table, Text,
-  TextInput, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Button, Center, Group, Loader, Menu, Modal, Stack, Table, Text,
+  TextInput, Tooltip } from "@mantine/core";
+import { Link } from "react-router";
 import { notifications } from "@mantine/notifications";
-import { IconAlertTriangle, IconDots, IconKey, IconLock, IconPencil, IconPlugConnected, IconPlus, IconSearch,
+import { IconAlertTriangle, IconApps, IconDots, IconKey, IconLock, IconPencil, IconPlugConnected, IconPlus, IconSearch,
   IconTrash } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useProcessStream } from "../../api/processStream";
@@ -15,6 +16,11 @@ import { JoinTokensModal } from "./JoinTokensModal";
 import { useApplicationMutations, useApplications, type ApplicationDefinition, type ApplicationInput }
   from "./applicationsApi";
 import { key, matches, runningInstances, servicesByOwner, undefinedRunning } from "./model";
+import { PageHeader } from "../../ui/PageHeader";
+import { TableCard } from "../../ui/TableCard";
+import { ServiceChip } from "../../ui/ServiceChip";
+import { EmptyState } from "../../ui/EmptyState";
+import { TableCount } from "../../ui/TableCount";
 
 export function ApplicationsPage() {
   const { can } = useAuth();
@@ -74,20 +80,12 @@ export function ApplicationsPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={2}>Applications</Title>
-          <Text size="sm" c="dimmed">
-            Only instances of a defined application may register; others are told to stop. Registries pick up
-            changes within 10 seconds.
-          </Text>
-        </div>
-        {manage && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
-            Define application
-          </Button>
-        )}
-      </Group>
+      <PageHeader title="Applications" description="Only instances of a defined application may register; others are told to stop. Registries pick up changes within 10 seconds."
+                  action={manage && (
+                    <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing(null)}>
+                      Define application
+                    </Button>
+                  )} />
 
       <TextInput
         placeholder="Search by group, name or description"
@@ -113,13 +111,17 @@ export function ApplicationsPage() {
           <Loader />
         </Center>
       ) : shown.length === 0 ? (
-        <Center py="xl">
-          <Text c="dimmed">{query ? "No applications match" : "No applications defined yet"}</Text>
-        </Center>
+        query ? (
+          <EmptyState icon={IconSearch} title="No applications match"
+                      action={<Button variant="subtle" size="xs" onClick={() => setQuery("")}>Clear search</Button>} />
+        ) : (
+          <EmptyState icon={IconApps} title="No applications defined yet"
+                      hint="Until an application is defined, the registries turn its instances away." />
+        )
       ) : (
-        <Card withBorder padding={0} radius="md">
-          <div style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="sm" highlightOnHover miw={720}>
+        <TableCard footer={<TableCount shown={shown.length} total={all.length} one="application"
+                                       many="applications" />}>
+            <Table miw={720}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Application</Table.Th>
@@ -155,9 +157,12 @@ export function ApplicationsPage() {
                       {seesProcesses && (
                         <Table.Td>
                           {instances ? (
-                            <Badge variant="light" color="green" radius="sm">
-                              {instances === 1 ? "1 instance" : `${instances} instances`}
-                            </Badge>
+                            <Tooltip label="Show them in Processes">
+                              <Badge color="green" component={Link} style={{ cursor: "pointer" }}
+                                     to={`/processes?${new URLSearchParams({ application: id })}`}>
+                                {instances === 1 ? "1 instance" : `${instances} instances`}
+                              </Badge>
+                            </Tooltip>
                           ) : (
                             <Text size="sm" c="dimmed">
                               Not running
@@ -170,7 +175,7 @@ export function ApplicationsPage() {
                           {owned.get(id)?.length ? (
                             <Group gap={4}>
                               {owned.get(id)!.map((service) => (
-                                <Code key={service}>{service}</Code>
+                                <ServiceChip key={service} label={service} />
                               ))}
                             </Group>
                           ) : (
@@ -222,8 +227,7 @@ export function ApplicationsPage() {
                 })}
               </Table.Tbody>
             </Table>
-          </div>
-        </Card>
+        </TableCard>
       )}
 
       <JoinTokensModal target={tokensOf} onClose={() => setTokensOf(null)} />

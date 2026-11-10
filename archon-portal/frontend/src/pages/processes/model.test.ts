@@ -1,5 +1,5 @@
 import { process, snapshot } from "../../test/fixtures";
-import { DEFAULT_SORT, filterProcesses, isSecure, matches, roleOf, serviceLabel, sortProcesses, stateTone, summarize,
+import { countIssues, DEFAULT_SORT, filterProcesses, groupByApplication, issuesOf, isSecure, matches, roleOf, serviceLabel, sortProcesses, stateLabel, stateTone, summarize,
   type ProcessFilters } from "./model";
 
 describe("roleOf", () => {
@@ -46,7 +46,7 @@ describe("matches", () => {
   });
 });
 
-const NONE: ProcessFilters = { query: "", showStopped: false, applications: [], states: [], link: "any" };
+const NONE: ProcessFilters = { query: "", showStopped: false, applications: [], states: [], issue: null };
 const hosts = (list: typeof snapshot.processes) => list.map((process) => process.details?.host);
 
 describe("filterProcesses", () => {
@@ -55,13 +55,13 @@ describe("filterProcesses", () => {
     expect(filterProcesses(snapshot.processes, { ...NONE, showStopped: true })).toHaveLength(5);
   });
 
-  it("filters by application, state, registry link and search together", () => {
+  it("filters by application, state, issue and search together", () => {
     expect(hosts(filterProcesses(snapshot.processes, { ...NONE, applications: ["Archon:Registry"] })))
       .toEqual(["archon-registry-1", "archon-registry-0"]);
     expect(hosts(filterProcesses(snapshot.processes, { ...NONE, showStopped: true, states: ["KILLED"] })))
       .toEqual(["hello-world-java-dead1"]);
-    expect(hosts(filterProcesses(snapshot.processes, { ...NONE, showStopped: true, link: "disconnected" })))
-      .toEqual(["hello-world-java-dead1"]);
+    expect(hosts(filterProcesses(snapshot.processes, { ...NONE, issue: "unencrypted" })))
+      .toEqual(["hello-world-java-94fdt"]);
     expect(hosts(filterProcesses(snapshot.processes, { ...NONE, applications: ["Archon:Registry"],
       query: "registry-0" }))).toEqual(["archon-registry-0"]);
   });
@@ -104,5 +104,40 @@ describe("isSecure", () => {
     expect(isSecure(leader!, "ping@192.168.192.78:9001")).toBe(true);
     expect(isSecure(standby!, "ping@192.168.192.86:9001")).toBe(false);
     expect(isSecure({ ...leader!, secureServices: undefined }, "ping@192.168.192.78:9001")).toBe(false);
+  });
+});
+
+describe("issues", () => {
+  it("finds what wants a look on a running instance", () => {
+    expect(issuesOf(process({}))).toEqual([]);
+    expect(issuesOf(process({ connected: false, runLevel: "STARTING" }))).toEqual(["disconnected", "notReady"]);
+    expect(issuesOf(process({ services: ["ping@10.0.0.1:9001"], secureServices: [] }))).toEqual(["unencrypted"]);
+    const busy = { ...snapshot.processes[0]!.metrics!, cpuLoad: 0.95 };
+    expect(issuesOf(process({ metrics: busy }))).toEqual(["nearLimit"]);
+  });
+
+  // A stopped record is not expected to be connected or ready
+  it("finds none on a stopped instance", () => {
+    expect(issuesOf(process({ running: false, connected: false, runLevel: "KILLED" }))).toEqual([]);
+  });
+
+  it("counts them across instances", () => {
+    expect(countIssues(snapshot.processes)).toEqual({ disconnected: 0, notReady: 0, unencrypted: 1, nearLimit: 0 });
+  });
+});
+
+describe("groupByApplication", () => {
+  it("keeps applications in place and sorts the instances inside them", () => {
+    const groups = groupByApplication(snapshot.processes, { column: "host", descending: false });
+    expect(groups.map((group) => group.application)).toEqual(["Group:Application", "Archon:Registry"]);
+    expect(groups[1]!.processes.map((member) => member.details?.host))
+      .toEqual(["archon-registry-0", "archon-registry-1"]);
+  });
+});
+
+describe("stateLabel", () => {
+  it("writes run levels as words", () => {
+    expect(stateLabel("RUNNING")).toBe("Running");
+    expect(stateLabel("SHUTTING_DOWN")).toBe("Shutting down");
   });
 });

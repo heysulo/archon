@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Badge, Box, Button, Drawer, Group, MultiSelect, ScrollArea, Stack, Text, TextInput,
+import { ActionIcon, Alert, Badge, Box, Button, Group, MultiSelect, ScrollArea, Stack, Text, TextInput,
   Tooltip } from "@mantine/core";
 import { IconArrowDown, IconDownload, IconEraser, IconPlayerPause, IconPlayerPlay, IconSearch }
   from "@tabler/icons-react";
@@ -18,27 +18,16 @@ export const logsUrl = (process: Pick<ProcessInfo, "group" | "name" | "rank">) =
 const SHOWN = 2_000;
 
 interface Props {
-  /** The instance to watch, or null when closed. */
-  process: ProcessInfo | null;
-  onClose: () => void;
+  /** The instance to watch. */
+  process: ProcessInfo;
   /** Lets tests stand in for the browser's EventSource. */
   source?: SourceFactory;
 }
 
-export function LogViewer({ process, onClose, source = openEventSource }: Props) {
-  const title = process ? `${process.group}:${process.name} #${process.rank}${process.details?.host
-    ? ` · ${process.details.host}` : ""}` : "";
-  return (
-    <Drawer opened={process !== null} onClose={onClose} position="right" size="80%" title={title}
-            styles={{ body: { height: "calc(100% - 60px)", display: "flex", flexDirection: "column" } }}>
-      {process && <Logs key={logsUrl(process)} process={process} source={source} />}
-    </Drawer>
-  );
-}
-
 type Connection = "connecting" | "live" | "reconnecting" | "signedout";
 
-function Logs({ process, source }: { process: ProcessInfo; source: SourceFactory }) {
+/** An instance's live logs, filling the height it is given. The stream is open for as long as this is mounted. */
+export function LogPanel({ process, source = openEventSource }: Props) {
   const [state, setState] = useState<LogState>(EMPTY);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [paused, setPaused] = useState(false);
@@ -118,19 +107,19 @@ function Logs({ process, source }: { process: ProcessInfo; source: SourceFactory
         <MultiSelect style={{ minWidth: 200 }} data={LEVELS} value={levels} onChange={setLevels} clearable
                      placeholder={levels.length ? undefined : "All levels"} aria-label="Filter by level" />
         <Tooltip label={paused ? "Resume" : "Pause: new lines wait until you resume"}>
-          <ActionIcon variant="default" size="lg" onClick={() => (paused ? resume() : pause())}
+          <ActionIcon variant="default" size="input-sm" onClick={() => (paused ? resume() : pause())}
                       aria-label={paused ? "Resume" : "Pause"}>
             {paused ? <IconPlayerPlay size={16} /> : <IconPlayerPause size={16} />}
           </ActionIcon>
         </Tooltip>
         <Tooltip label={follow ? "Following new lines" : "Follow new lines"}>
-          <ActionIcon variant={follow ? "filled" : "default"} size="lg" onClick={() => setFollow(!follow)}
+          <ActionIcon variant={follow ? "filled" : "default"} size="input-sm" onClick={() => setFollow(!follow)}
                       aria-label="Follow new lines" aria-pressed={follow}>
             <IconArrowDown size={16} />
           </ActionIcon>
         </Tooltip>
         <Tooltip label="Clear the screen">
-          <ActionIcon variant="default" size="lg" onClick={() => setState((current) => ({ ...EMPTY,
+          <ActionIcon variant="default" size="input-sm" onClick={() => setState((current) => ({ ...EMPTY,
             nextId: current.nextId }))} aria-label="Clear">
             <IconEraser size={16} />
           </ActionIcon>
@@ -142,13 +131,13 @@ function Logs({ process, source }: { process: ProcessInfo; source: SourceFactory
       </Group>
 
       <Group gap="xs">
-        <Badge variant="light" radius="sm" color={connection === "live" ? "green" : connection === "signedout"
+        <Badge color={connection === "live" ? "green" : connection === "signedout"
           ? "gray" : "yellow"}>
           {connection === "live" ? "Live" : connection === "signedout" ? "Signed out" : connection === "connecting"
             ? "Connecting" : "Reconnecting"}
         </Badge>
         {paused && (
-          <Badge variant="light" radius="sm" color="yellow">
+          <Badge color="yellow">
             Paused{waiting ? ` · ${waiting} waiting` : ""}
           </Badge>
         )}

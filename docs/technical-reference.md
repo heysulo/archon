@@ -649,11 +649,11 @@ and serves the full API. Sessions live in the database, so a browser can be serv
 
 | Page | What it does |
 |---|---|
-| Processes | Every instance in one sortable, filterable table, updated live, with its CPU and memory use. Services in green when served over TLS, red when not. Click an instance for its details and every configuration it sees, with where each comes from, to edit, override for the application or remove an override. Watch its logs live. |
-| Applications | Define and remove applications; assign services; manage join tokens and see the CA fingerprint. |
-| Services | Define services, their owner, port offset and mode. Running services are locked. |
+| Processes | Every instance in one table, updated live, grouped under its application (groups fold away) and sortable inside each group, with its CPU and memory use. Tiles above count the running instances that want a look: disconnected from the registry, not ready (running but not `RUNNING`), serving a service without TLS, or at 90% or more of their CPU or memory; pressing a tile shows only those. Services carry a closed lock in green when served over TLS, an open lock in red when not. Click an instance for one drawer with three tabs: its overview, every configuration it sees (with where each comes from, to edit, override for the application or remove an override), and its live logs, which stream only while that tab is open. |
+| Applications | Define and remove applications; assign services; manage join tokens and see the CA fingerprint. An application's running count links to its instances in Processes (`/processes?application=Group:Name`). |
+| Services | Define services, their owner, port offset and mode. Running services are locked. A service's owner links to that application's instances in Processes. |
 | Configurations | Every configuration at every level, searchable and paged. |
-| Users, Roles | Users, custom roles and their permissions. |
+| Users, Roles | Users (searchable by username, name or role), custom roles and their permissions. |
 
 ### 11.2 Users, roles and permissions
 

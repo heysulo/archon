@@ -1,13 +1,14 @@
+import { MemoryRouter } from "react-router";
 import { fireEvent, screen } from "@testing-library/react";
 import { ProcessStreamContext, type ProcessStreamState } from "../../api/processStream";
 import { snapshot } from "../../test/fixtures";
 import { renderWith } from "../../test/render";
 import { ProcessesPage } from "./ProcessesPage";
 
-function renderPage(state: ProcessStreamState, permissions = ["*"]) {
+function renderPage(state: ProcessStreamState, permissions = ["*"], address = "/processes") {
   return renderWith(
     <ProcessStreamContext.Provider value={state}>
-      <ProcessesPage />
+      <MemoryRouter initialEntries={[address]}><ProcessesPage /></MemoryRouter>
     </ProcessStreamContext.Provider>,
     { user: { id: 1, username: "admin", displayName: "Admin", roles: ["admin"], permissions } },
   );
@@ -40,15 +41,54 @@ describe("ProcessesPage", () => {
     expect(screen.queryByText("hello-world-java-4vsbc")).not.toBeInTheDocument();
   });
 
-  it("shows every application in one table, sorted by a clicked column", () => {
+  // Rows: the column headers, then each application's header above its instances
+  it("groups instances under their applications in one table, sorted inside each by a clicked column", () => {
     renderPage({ snapshot, status: "live", error: null });
     expect(screen.getAllByRole("table")).toHaveLength(1);
-    const firstHost = () => screen.getAllByRole("row")[1]!.textContent;
-    expect(firstHost()).toContain("hello-world-java-4vsbc");
+    const row = (index: number) => screen.getAllByRole("row")[index]!.textContent;
+    expect(row(1)).toContain("Group:Application");
+    expect(row(1)).toContain("2 running");
+    expect(row(1)).toContain("1 not encrypted");
+    expect(row(2)).toContain("hello-world-java-4vsbc");
+    expect(row(4)).toContain("Archon:Registry");
+    expect(row(5)).toContain("archon-registry-1");
     fireEvent.click(screen.getByLabelText("Sort by host"));
-    expect(firstHost()).toContain("archon-registry-0");
+    expect(row(5)).toContain("archon-registry-0");
     fireEvent.click(screen.getByLabelText("Sort by host"));
-    expect(firstHost()).toContain("hello-world-java-94fdt");
+    expect(row(2)).toContain("hello-world-java-94fdt");
+  });
+
+  it("opens on one application when another page links to it", () => {
+    renderPage({ snapshot, status: "live", error: null }, ["*"], "/processes?application=Archon%3ARegistry");
+    expect(screen.getByText("archon-registry-0")).toBeInTheDocument();
+    expect(screen.queryByText("hello-world-java-4vsbc")).not.toBeInTheDocument();
+  });
+
+  it("folds an application away", () => {
+    renderPage({ snapshot, status: "live", error: null });
+    fireEvent.click(screen.getByRole("button", { name: /^Archon:Registry/ }));
+    expect(screen.queryByText("archon-registry-0")).not.toBeInTheDocument();
+    expect(screen.getByText("hello-world-java-4vsbc")).toBeInTheDocument();
+  });
+
+  it("counts what wants attention and shows only those when asked", () => {
+    renderPage({ snapshot, status: "live", error: null });
+    fireEvent.click(screen.getByRole("button", { name: /Not encrypted: 1/ }));
+    expect(screen.getByText("hello-world-java-94fdt")).toBeInTheDocument();
+    expect(screen.queryByText("hello-world-java-4vsbc")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Disconnected: 0/ })).toBeDisabled();
+  });
+
+  it("opens straight on the logs from a row's logs button", async () => {
+    // jsdom has no EventSource; the stream itself is LogPanel's to test
+    vi.stubGlobal("EventSource", class {
+      addEventListener() {}
+      close() {}
+    });
+    renderPage({ snapshot, status: "live", error: null });
+    fireEvent.click(screen.getByLabelText("Logs of Group:Application #1"));
+    expect(await screen.findByRole("tab", { name: "Logs", selected: true })).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it("shows services served with TLS apart from those in the clear", () => {
@@ -80,7 +120,7 @@ describe("ProcessesPage", () => {
     expect(screen.getByText("300 MB")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Sort by cpu"));
     fireEvent.click(screen.getByLabelText("Sort by cpu"));
-    expect(screen.getAllByRole("row")[1]!.textContent).toContain("25%");
+    expect(screen.getAllByRole("row")[2]!.textContent).toContain("25%");
   });
 
   it("warns when the registry is unavailable but keeps the last state", () => {

@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { ProcessStreamContext, type ProcessStreamState } from "../../api/processStream";
 import { mockPortal, renderWith } from "../../test/render";
@@ -35,7 +36,7 @@ const STREAM = {
 function renderPage(options?: Parameters<typeof renderWith>[1]) {
   return renderWith(
     <ProcessStreamContext.Provider value={STREAM}>
-      <ApplicationsPage />
+      <MemoryRouter><ApplicationsPage /></MemoryRouter>
     </ProcessStreamContext.Provider>,
     options,
   );
@@ -47,7 +48,8 @@ describe("ApplicationsPage", () => {
   it("lists definitions with their running instances, Archon's own locked", async () => {
     renderPage();
     expect(await screen.findByText("Group:Application")).toBeInTheDocument();
-    expect(screen.getByText("1 instance")).toBeInTheDocument();
+    expect(screen.getByText("1 instance").closest("a")).toHaveAttribute("href",
+      "/processes?application=Group%3AApplication");
     expect(screen.getByLabelText("Part of Archon")).toBeInTheDocument();
     expect(screen.queryByLabelText("Actions for Archon:Portal")).not.toBeInTheDocument();
     expect(screen.getByText(/Running but not defined: Old:Thing/)).toBeInTheDocument();
